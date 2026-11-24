@@ -115,7 +115,8 @@
   .view-body{flex:1;min-height:0;position:relative}
   #cv3d{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
   #cv3d:active{cursor:grabbing}
-  .cad-wrap{flex:1;min-height:0;padding:6px;display:flex}
+  .cad-wrap{flex:1;min-height:0;padding:6px;display:flex;position:relative}
+  #dxfTip{display:none;left:10px;bottom:8px}
   #cadSvg{width:100%;height:100%;display:block}
   .hint{
     position:absolute;left:10px;bottom:8px;font-size:10.5px;color:#94a3b8;pointer-events:none;
@@ -215,11 +216,12 @@
     <div class="card-head">
       <h2>CAD 工程图</h2>
       <div class="tools">
+        <button class="btn" id="btnDxf">导出 DXF</button>
         <button class="btn" id="btnSvg">导出 SVG</button>
         <button class="btn" id="btnPrint">打印</button>
       </div>
     </div>
-    <div class="cad-wrap"><svg id="cadSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg></div>
+    <div class="cad-wrap"><div class="hint" id="dxfTip"></div><svg id="cadSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg></div>
   </section>
 </main>
 
@@ -231,11 +233,11 @@
    1. 基础定义
    ========================================================= */
 var TYPES = {
-  rack:     {label:'亚克力展示架', code:'RLG-SJ', defW:600, defD:400, defH:1500, defL:3},
-  cabinet:  {label:'亚克力展柜',   code:'RLG-ZG', defW:900, defD:500, defH:1800, defL:3},
-  table:    {label:'亚克力展示台', code:'RLG-ST', defW:1000, defD:600, defH:900,  defL:1},
-  box:      {label:'亚克力陈列盒', code:'RLG-HX', defW:400, defD:300, defH:250,  defL:3},
-  lightbox: {label:'亚克力灯箱',   code:'RLG-DX', defW:800, defD:120, defH:600,  defL:1}
+  rack:     {label:'亚克力展示架', code:'RLG-SJ', en:'SHELF', defW:600, defD:400, defH:1500, defL:3},
+  cabinet:  {label:'亚克力展柜',   code:'RLG-ZG', en:'CABINET', defW:900, defD:500, defH:1800, defL:3},
+  table:    {label:'亚克力展示台', code:'RLG-ST', en:'TABLE', defW:1000, defD:600, defH:900,  defL:1},
+  box:      {label:'亚克力陈列盒', code:'RLG-HX', en:'DISPLAY BOX', defW:400, defD:300, defH:250,  defL:3},
+  lightbox: {label:'亚克力灯箱',   code:'RLG-DX', en:'LIGHT BOX', defW:800, defD:120, defH:600,  defL:1}
 };
 
 var MAT = {
@@ -588,10 +590,11 @@ function spinLoop(){
 }
 
 /* =========================================================
-   5. CAD 工程图（三视图 + 尺寸 + 标题栏）
+   5. CAD 工程图：先算图元（真实 mm / y 向上 / 第一角法），
+      再分别输出 SVG（屏幕看）与 DXF（桌面 CAD 打开）
    ========================================================= */
 var NS = 'http://www.w3.org/2000/svg';
-var FS = 12, FS2 = 10;
+var SHEET = null;
 
 function el(tag, attrs, text){
   var n = document.createElementNS(NS, tag);
@@ -600,179 +603,368 @@ function el(tag, attrs, text){
   return n;
 }
 
-function buildCAD(){
-  var svg = document.getElementById('cadSvg');
-  while(svg.firstChild) svg.removeChild(svg.firstChild);
-
+function buildSheet(){
   var W = params.W, D = params.D, H = params.H;
-  var gap0 = 70;
+  var U = Math.max(W, H, D, 200);
+  var FS  = U * 0.026;          /* 主字高 */
+  var FS2 = FS * 0.80;          /* 标注字高 */
+  var gapH = FS * 5.6;
+  var gapV = FS * 5.6;
+  var THICK = U / 950;
+  var THIN  = U / 2400;
+  var items = [];
 
-  /* 先估算比例，再整体归一化，保证不同尺寸的图看起来"一样大" */
-  var s0 = Math.min((700 - gap0) / Math.max(W + D, 1), (470 - gap0) / Math.max(H + D, 1));
-  var totW0 = (W + D) * s0 + gap0;
-  var totH0 = (H + D) * s0 + gap0;
-  var k = 600 / Math.max(totW0, totH0);
-  var s = s0 * k;
-  var gap = gap0 * k;
+  function addLine(x1,y1,x2,y2,layer,w){
+    items.push({t:'line', x1:x1, y1:y1, x2:x2, y2:y2, layer:layer||'THIN', w:w||THIN});
+  }
+  function addRect(x0,y0,x1,y1,layer,opt){
+    opt = opt || {};
+    items.push({t:'rect',
+      x0:Math.min(x0,x1), y0:Math.min(y0,y1), x1:Math.max(x0,x1), y1:Math.max(y0,y1),
+      layer:layer, dash:!!opt.dash, fill:!!opt.fill, w:opt.w||THIN});
+  }
+  function addText(x,y,h,zh,en,layer,align,rot){
+    items.push({t:'text', x:x, y:y, h:h, s:zh, sa:(en==null?zh:en),
+      layer:layer||'TEXT', align:align||'center', rot:rot||0});
+  }
+  function addTri(pts,layer){
+    items.push({t:'tri', pts:pts, layer:layer||'DIM'});
+  }
 
-  var wF = W*s, hF = H*s, wS = D*s, hS = H*s, wP = W*s, hP = D*s;
-  var X0 = 0, Y0 = 0;
-
-  var defs = el('defs');
-  var mk = el('marker', {id:'ar', viewBox:'0 0 10 10', refX:'9', refY:'5',
-    markerWidth:'7', markerHeight:'7', orient:'auto-start-reverse'});
-  mk.appendChild(el('path', {d:'M0,0 L10,5 L0,10 z', fill:'#1f2937'}));
-  defs.appendChild(mk);
-  svg.appendChild(defs);
-
-  var g = el('g');
-  svg.appendChild(g);
-
-  /* ---- 视图映射 ---- */
-  var MAP = {
-    front: function(b){ return {cx:b.x, cy:b.y, w:b.w, h:b.h, depth:b.z}; },
-    side:  function(b){ return {cx:b.z, cy:b.y, w:b.d, h:b.h, depth:b.x}; },
-    plan:  function(b){ return {cx:b.x, cy:b.z, w:b.w, h:b.d, depth:b.y}; }
+  /* ---------- 三视图 ---------- */
+  var ox = 0, oy = 0;
+  var sideX0 = W + gapH;
+  var planY0 = -(D + gapV);
+  var LB = {
+    front:{zh:'正 视 图', en:'FRONT VIEW'},
+    side: {zh:'侧 视 图', en:'SIDE VIEW'},
+    plan: {zh:'俯 视 图', en:'TOP VIEW'}
   };
 
-  function drawView(name, ox, oy, spanH, spanV, opts){
-    opts = opts || {};
-    var map = MAP[name];
-    var items = model.map(function(b){
-      var m = map(b);
-      return {m:m, b:b};
-    });
-    /* 远→近排序，保证遮挡关系 */
-    items.sort(function(a,b){ return a.m.depth - b.m.depth; });
+  var KIND_LAYER = {frame:'OUTLINE', panel:'OUTLINE', shelf:'OUTLINE',
+                    glass:'GLASS', hidden:'HIDDEN', light:'OUTLINE'};
+  var KIND_FILL  = {frame:true, panel:true, shelf:true, light:true, glass:false, hidden:false};
 
-    items.forEach(function(it){
-      var m = it.m;
-      var x = opts.flipH ? ox + (spanH/2 - m.cx - m.w/2)*s : ox + (m.cx - m.w/2 + spanH/2)*s;
-      var y = opts.flipV ? oy + (m.cy - m.h/2 + spanV/2)*s : oy + (spanV - m.cy - m.h/2)*s;
-      var w = Math.max(0.6, m.w*s), h = Math.max(0.6, m.h*s);
-      var isGlass = it.b.kind === 'glass' || it.b.kind === 'hidden';
-      var r = el('rect', {
-        x: x.toFixed(2), y: y.toFixed(2), width: w.toFixed(2), height: h.toFixed(2),
-        fill: isGlass ? 'none' : '#ffffff',
-        stroke: '#1f2937',
-        'stroke-width': it.b.kind === 'frame' ? 1.0 : 0.7,
-        'stroke-dasharray': it.b.kind === 'hidden' ? '4 3' : 'none'
+  /* 第一角法：俯视图在主视图下方（物体前面朝上），侧视图在右侧 */
+  function drawView(kind){
+    var list = model.slice();
+    if(kind === 'front') list.sort(function(a,b){ return a.z - b.z; });          /* 近处 z 大，后画 */
+    if(kind === 'side')  list.sort(function(a,b){ return b.x - a.x; });          /* 左视图从 -x 看 */
+    if(kind === 'plan')  list.sort(function(a,b){ return a.y - b.y; });
+
+    list.forEach(function(b){
+      var h0, h1, v0, v1;
+      if(kind === 'side'){ h0 = b.z - b.d/2; h1 = b.z + b.d/2; }
+      else { h0 = b.x - b.w/2; h1 = b.x + b.w/2; }
+
+      if(kind === 'plan'){ v0 = b.z - b.d/2; v1 = b.z + b.d/2; }
+      else { v0 = b.y - b.h/2; v1 = b.y + b.h/2; }
+
+      var x0, x1, y0, y1;
+      if(kind === 'front'){
+        x0 = ox + (h0 + W/2); x1 = ox + (h1 + W/2);
+        y0 = oy + v0;         y1 = oy + v1;
+      } else if(kind === 'side'){
+        x0 = sideX0 + (D/2 - h1); x1 = sideX0 + (D/2 - h0);   /* 前面在左，靠近主视图 */
+        y0 = oy + v0;             y1 = oy + v1;
+      } else {
+        x0 = ox + (h0 + W/2);     x1 = ox + (h1 + W/2);
+        y0 = planY0 + (v0 + D/2); y1 = planY0 + (v1 + D/2);   /* 物体前面朝上（第一角法） */
+      }
+
+      addRect(x0, y0, x1, y1, KIND_LAYER[b.kind] || 'THIN', {
+        dash: b.kind === 'hidden',
+        fill: KIND_FILL[b.kind] !== false,
+        w: (b.kind === 'frame' ? THICK : THIN)
       });
-      g.appendChild(r);
     });
 
-    /* 视图标签 */
-    var lx = ox + spanH*s/2;
-    var ly = opts.labelY != null ? opts.labelY : (oy + spanV*s + FS*3.4);
-    var lb = el('text', {x: lx.toFixed(2), y: ly.toFixed(2), 'text-anchor':'middle',
-      'font-size': FS, fill:'#334155', 'font-family':'"Segoe UI","Microsoft YaHei",sans-serif',
-      'letter-spacing':'3'}, opts.label || '');
-    g.appendChild(lb);
+    /* 视图名 */
+    var lx, ly;
+    if(kind === 'front'){ lx = ox + W/2; ly = -(FS*4.6); }
+    if(kind === 'side'){  lx = sideX0 + D/2; ly = -(FS*4.6); }
+    if(kind === 'plan'){  lx = ox + W/2; ly = planY0 - FS*2.4; }
+    addText(lx, ly, FS, LB[kind].zh, LB[kind].en, 'TEXT', 'center');
+  }
+  function hP(){ return D; }
+
+  drawView('front');
+  drawView('side');
+  drawView('plan');
+
+  /* ---------- 尺寸标注 ---------- */
+  function arrow(x, y, dir, vertical){
+    var ah = FS*0.52, aw = FS*0.17;
+    if(!vertical) addTri([[x, y], [x + dir*ah, y + aw], [x + dir*ah, y - aw]], 'DIM');
+    else          addTri([[x, y], [x + aw, y + dir*ah], [x - aw, y + dir*ah]], 'DIM');
   }
 
-  /* 正视图 */
-  drawView('front', X0, Y0, W, H, {label:'正 视 图'});
-  /* 侧视图 */
-  drawView('side', X0 + wF + gap, Y0, D, H, {label:'侧 视 图'});
-  /* 俯视图 */
-  drawView('plan', X0, Y0 + hF + gap, W, D, {label:'俯 视 图'});
-
-  /* ---- 尺寸标注 ---- */
-  function dimText(x, y, text, rot){
-    var t = el('text', {x:x.toFixed(2), y:y.toFixed(2), 'text-anchor':'middle',
-      'font-size': FS2, fill:'#1f2937', 'font-family':'"Segoe UI","Microsoft YaHei",sans-serif',
-      'dominant-baseline':'middle'}, text);
-    if(rot) t.setAttribute('transform', 'rotate(-90 ' + x.toFixed(2) + ' ' + y.toFixed(2) + ')');
-    g.appendChild(t);
+  function dimH(x1, x2, y, label, fromY){
+    if(fromY != null){
+      addLine(x1, fromY, x1, y, 'DIM', THIN*0.7);
+      addLine(x2, fromY, x2, y, 'DIM', THIN*0.7);
+    }
+    addLine(x1, y, x2, y, 'DIM', THIN*0.9);
+    arrow(x1, y, 1);
+    arrow(x2, y, -1);
+    addText((x1+x2)/2, y + FS*0.95, FS2, label, label, 'DIM', 'center');
   }
 
-  function dimH(x1, x2, y, label, extFrom){
-    g.appendChild(el('line', {x1:x1, y1:extFrom, x2:x1, y2:y + 4, stroke:'#64748b', 'stroke-width':0.5}));
-    g.appendChild(el('line', {x1:x2, y1:extFrom, x2:x2, y2:y + 4, stroke:'#64748b', 'stroke-width':0.5}));
-    g.appendChild(el('line', {x1:x1, y1:y, x2:x2, y2:y, stroke:'#1f2937', 'stroke-width':0.6,
-      'marker-start':'url(#ar)', 'marker-end':'url(#ar)'}));
-    dimText((x1+x2)/2, y - FS2*0.95, label);
+  function dimV(y1, y2, x, label, fromX){
+    if(fromX != null){
+      addLine(fromX, y1, x, y1, 'DIM', THIN*0.7);
+      addLine(fromX, y2, x, y2, 'DIM', THIN*0.7);
+    }
+    addLine(x, y1, x, y2, 'DIM', THIN*0.9);
+    arrow(x, y1, 1, true);
+    arrow(x, y2, -1, true);
+    addText(x - FS*0.95, (y1+y2)/2, FS2, label, label, 'DIM', 'center', 90);
   }
 
-  function dimV(y1, y2, x, label, extFrom){
-    g.appendChild(el('line', {x1:extFrom, y1:y1, x2:x - 4, y2:y1, stroke:'#64748b', 'stroke-width':0.5}));
-    g.appendChild(el('line', {x1:extFrom, y1:y2, x2:x - 4, y2:y2, stroke:'#64748b', 'stroke-width':0.5}));
-    g.appendChild(el('line', {x1:x, y1:y1, x2:x, y2:y2, stroke:'#1f2937', 'stroke-width':0.6,
-      'marker-start':'url(#ar)', 'marker-end':'url(#ar)'}));
-    dimText(x - FS2*0.9, (y1+y2)/2, label, true);
-  }
-
-  /* 正视图：总宽 / 总高 */
-  dimH(X0, X0 + wF, Y0 + hF + 26, W + '', Y0 + hF);
-  dimV(Y0, Y0 + hF, X0 - 26, H + '', X0);
+  /* 主视图：总宽 / 总高 */
+  dimH(ox, ox + W, -(FS*2.2), String(W), 0);
+  dimV(oy, oy + H, -(FS*2.2), String(H), 0);
   /* 侧视图：总深 */
-  dimH(X0 + wF + gap, X0 + wF + gap + wS, Y0 + hF + 26, D + '', Y0 + hF);
-  /* 俯视图：总深 */
-  dimV(Y0 + hF + gap, Y0 + hF + gap + hP, X0 + wF + 26, D + '', X0 + wF);
+  dimH(sideX0, sideX0 + D, -(FS*2.2), String(D), 0);
+  /* 俯视图：总深（右侧） */
+  dimV(planY0, planY0 + D, W + FS*2.2, String(D), W);
 
-  /* 层高标注 */
+  /* 层高 */
   var shelves = model.filter(function(b){ return b.kind === 'shelf' || b.kind === 'hidden'; })
     .map(function(b){ return b.y; })
     .sort(function(a,b){ return a - b; });
   if(shelves.length > 1 && shelves.length <= 7){
-    var rx = X0 + wF + 30;
+    var rx = W + FS*3.4;
     for(var i=0;i<shelves.length-1;i++){
-      var yTop = Y0 + (H - shelves[i+1]) * s;
-      var yBot = Y0 + (H - shelves[i]) * s;
-      if(yTop < Y0 - 1) continue;
-      g.appendChild(el('line', {x1:X0 + wF, y1:yTop, x2:rx + 4, y2:yTop, stroke:'#94a3b8', 'stroke-width':0.4, 'stroke-dasharray':'3 2'}));
-      g.appendChild(el('line', {x1:X0 + wF, y1:yBot, x2:rx + 4, y2:yBot, stroke:'#94a3b8', 'stroke-width':0.4, 'stroke-dasharray':'3 2'}));
-      g.appendChild(el('line', {x1:rx, y1:yTop, x2:rx, y2:yBot, stroke:'#1f2937', 'stroke-width':0.55,
-        'marker-start':'url(#ar)', 'marker-end':'url(#ar)'}));
-      dimText(rx + FS2*0.85, (yTop+yBot)/2, Math.round(Math.abs(shelves[i+1]-shelves[i])) + '', true);
+      var yA = shelves[i], yB = shelves[i+1];
+      if(yA < -1) continue;
+      addLine(W, yA, rx + FS*0.3, yA, 'DIM', THIN*0.6);
+      addLine(W, yB, rx + FS*0.3, yB, 'DIM', THIN*0.6);
+      addLine(rx, yA, rx, yB, 'DIM', THIN*0.8);
+      arrow(rx, yA, 1, true);
+      arrow(rx, yB, -1, true);
+      addText(rx + FS*0.9, (yA+yB)/2, FS2, String(Math.round(yB - yA)),
+              String(Math.round(yB - yA)), 'DIM', 'center', 90);
     }
   }
 
-  /* ---- 标题栏 ---- */
-  var tbW = 236, tbH = 68;
-  var tbX = X0 + wF + 40, tbY = Y0 + hF + gap + hP - tbH;
+  /* ---------- 标题栏 ---------- */
   var d = TYPES[params.type];
-  g.appendChild(el('rect', {x:tbX, y:tbY, width:tbW, height:tbH, fill:'#fff', stroke:'#1f2937', 'stroke-width':1.2}));
-  [17, 34, 51].forEach(function(dy){
-    g.appendChild(el('line', {x1:tbX, y1:tbY+dy, x2:tbX+tbW, y2:tbY+dy, stroke:'#1f2937', 'stroke-width':0.6}));
+  var tbW = U * 0.42, tbH = U * 0.125;
+  var tbX = W + gapH, tbY = planY0;
+  addRect(tbX, tbY, tbX + tbW, tbY + tbH, 'FRAME', {w: THICK*0.8});
+  [0.25, 0.5, 0.75].forEach(function(f){
+    addLine(tbX, tbY + tbH*f, tbX + tbW, tbY + tbH*f, 'FRAME', THIN*0.8);
   });
-  g.appendChild(el('line', {x1:tbX+136, y1:tbY+17, x2:tbX+136, y2:tbY+tbH, stroke:'#1f2937', 'stroke-width':0.6}));
+  addLine(tbX + tbW*0.58, tbY + tbH*0.25, tbX + tbW*0.58, tbY + tbH, 'FRAME', THIN*0.8);
 
   var today = new Date();
-  var dateStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
-  var scaleN = Math.max(1, Math.round(1/s));
-
-  function cell(x, y, text, size, bold, anchor){
-    g.appendChild(el('text', {x:x, y:y, 'font-size': size, fill:'#1f2937',
-      'font-family':'"Segoe UI","Microsoft YaHei",sans-serif',
-      'font-weight': bold ? '650' : '400',
-      'text-anchor': anchor || 'start', 'dominant-baseline':'middle'}, text));
+  var dateStr = today.getFullYear() + '-' +
+    String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  var rowH = tbH*0.25;
+  function cell(cx, cy, zh, en, size, bold){
+    addText(cx, cy, size, zh, en, 'TEXT', 'left');
   }
-  cell(tbX+8, tbY+9, '瑞利高展示科技', FS2, true);
-  cell(tbX+142, tbY+9, d.code, FS2 - 1, false);
-  cell(tbX+8, tbY+25.5, '图名', FS2 - 1, false);
-  cell(tbX+40, tbY+25.5, d.label, FS2, true);
-  cell(tbX+8, tbY+42.5, '比例', FS2 - 1, false);
-  cell(tbX+40, tbY+42.5, '1 : ' + scaleN, FS2, false);
-  cell(tbX+144, tbY+25.5, '单位', FS2 - 1, false);
-  cell(tbX+176, tbY+25.5, 'mm', FS2, false);
-  cell(tbX+144, tbY+42.5, '板厚', FS2 - 1, false);
-  cell(tbX+176, tbY+42.5, 't' + params.t, FS2, false);
-  cell(tbX+8, tbY+59.5, dateStr, FS2 - 1, false);
-  cell(tbX+144, tbY+59.5, '第 1 页 共 1 页', FS2 - 1, false);
+  var tx = tbX + tbW*0.035, TS = tbH*0.165;
+  cell(tx, tbY + rowH*3.5, '瑞利高展示科技', 'RUILIGAO DISPLAY TECH', TS);
+  cell(tx, tbY + rowH*2.5, '图名 ' + d.label, 'NAME ' + (d.en || d.code), TS);
+  cell(tx, tbY + rowH*1.5, '比例 1:1', 'SCALE 1:1', TS);
+  cell(tx, tbY + rowH*0.5, dateStr, dateStr, TS);
+  var tx2 = tbX + tbW*0.62;
+  cell(tx2, tbY + rowH*2.5, '单位 mm', 'UNIT mm', TS);
+  cell(tx2, tbY + rowH*1.5, '板厚 t' + params.t, 'T=' + params.t, TS);
+  cell(tx2, tbY + rowH*0.5, d.code, d.code, TS);
 
-  /* ---- 图框 ---- */
-  var bb = g.getBBox();
-  var pad = 20;
-  var outer = el('rect', {x: bb.x - pad, y: bb.y - pad, width: bb.width + pad*2, height: bb.height + pad*2,
-    fill:'#fff', stroke:'#1f2937', 'stroke-width': 2.2});
-  var inner = el('rect', {x: bb.x - pad + 7, y: bb.y - pad + 7, width: bb.width + pad*2 - 14, height: bb.height + pad*2 - 14,
-    fill:'none', stroke:'#1f2937', 'stroke-width': 0.7});
-  svg.insertBefore(inner, g);
-  svg.insertBefore(outer, g);
+  /* ---------- 图框 ---------- */
+  var bb = sheetBBox(items);
+  var pad = FS * 2.2;
+  addRect(bb.x0 - pad, bb.y0 - pad, bb.x1 + pad, bb.y1 + pad, 'FRAME', {w: THICK});
+  addRect(bb.x0 - pad*0.72, bb.y0 - pad*0.72, bb.x1 + pad*0.72, bb.y1 + pad*0.72, 'FRAME', {w: THIN});
 
-  var vx = bb.x - pad - 6, vy = bb.y - pad - 6, vw = bb.width + pad*2 + 12, vh = bb.height + pad*2 + 12;
-  svg.setAttribute('viewBox', vx.toFixed(1) + ' ' + vy.toFixed(1) + ' ' + vw.toFixed(1) + ' ' + vh.toFixed(1));
+  var full = sheetBBox(items);
+  return {
+    items: items,
+    bbox: full,
+    pad: pad*0.35,
+    U: U,
+    meta: {W:W, D:D, H:H, t:params.t, code:d.code, zh:d.label, en:d.en || d.code, date:dateStr}
+  };
+}
+
+function sheetBBox(items){
+  var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  function add(x, y){
+    if(x < x0) x0 = x; if(x > x1) x1 = x;
+    if(y < y0) y0 = y; if(y > y1) y1 = y;
+  }
+  items.forEach(function(it){
+    if(it.t === 'line'){ add(it.x1, it.y1); add(it.x2, it.y2); }
+    else if(it.t === 'rect'){ add(it.x0, it.y0); add(it.x1, it.y1); }
+    else if(it.t === 'tri'){ it.pts.forEach(function(p){ add(p[0], p[1]); }); }
+    else if(it.t === 'text'){
+      var w = it.s.length * it.h * 0.66;
+      if(it.rot){
+        add(it.x - it.h*0.55, it.y - w/2);
+        add(it.x + it.h*0.55, it.y + w/2);
+      } else if(it.align === 'center'){
+        add(it.x - w/2, it.y - it.h*0.55);
+        add(it.x + w/2, it.y + it.h*0.65);
+      } else {
+        add(it.x, it.y - it.h*0.55);
+        add(it.x + w, it.y + it.h*0.65);
+      }
+    }
+  });
+  return {x0:x0, y0:y0, x1:x1, y1:y1};
+}
+
+/* ---------- 输出 SVG ---------- */
+function renderSheet(sh){
+  var svg = document.getElementById('cadSvg');
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+
+  var b = sh.bbox, pad = sh.pad;
+  svg.setAttribute('viewBox',
+    (b.x0 - pad) + ' ' + (-(b.y1 + pad)) + ' ' + ((b.x1 - b.x0) + pad*2) + ' ' + ((b.y1 - b.y0) + pad*2));
+
+  var g = el('g');
+  svg.appendChild(g);
+
+  function sw(w){ return (w / sh.U * 1400).toFixed(2); }
+
+  sh.items.forEach(function(it){
+    if(it.t === 'line'){
+      g.appendChild(el('line', {
+        x1: it.x1, y1: -it.y1, x2: it.x2, y2: -it.y2,
+        stroke: strokeOf(it.layer), 'stroke-width': sw(it.w),
+        'stroke-dasharray': it.layer === 'HIDDEN' ? '4 3' : 'none',
+        'vector-effect': 'non-scaling-stroke'
+      }));
+    } else if(it.t === 'rect'){
+      g.appendChild(el('rect', {
+        x: it.x0, y: -it.y1, width: Math.max(0.05, it.x1 - it.x0), height: Math.max(0.05, it.y1 - it.y0),
+        fill: it.fill ? '#ffffff' : 'none',
+        stroke: strokeOf(it.layer), 'stroke-width': sw(it.w),
+        'stroke-dasharray': it.dash ? '4 3' : 'none',
+        'vector-effect': 'non-scaling-stroke'
+      }));
+    } else if(it.t === 'tri'){
+      g.appendChild(el('polygon', {
+        points: it.pts.map(function(p){ return p[0] + ',' + (-p[1]); }).join(' '),
+        fill: '#1f2937'
+      }));
+    } else if(it.t === 'text'){
+      var t = el('text', {
+        x: it.x, y: -it.y, 'font-size': it.h, fill: it.layer === 'DIM' ? '#1f2937' : '#1f2937',
+        'font-family': '"Segoe UI","Microsoft YaHei",sans-serif',
+        'text-anchor': it.align === 'center' ? 'middle' : 'start',
+        'dominant-baseline': 'middle'
+      }, it.s);
+      if(it.rot) t.setAttribute('transform', 'rotate(-90 ' + it.x + ' ' + (-it.y) + ')');
+      g.appendChild(t);
+    }
+  });
+  return svg;
+}
+
+function strokeOf(layer){
+  if(layer === 'GLASS') return '#5b8ea3';
+  if(layer === 'DIM') return '#1f2937';
+  if(layer === 'HIDDEN') return '#94a3b8';
+  return '#1f2937';
+}
+
+function buildCAD(){
+  SHEET = buildSheet();
+  renderSheet(SHEET);
+}
+
+/* ---------- 输出 DXF（R12 / AC1009，桌面 CAD 直接打开） ---------- */
+function dxfNum(n){
+  var v = Math.round(n * 1000) / 1000;
+  return (Math.abs(v) < 0.0005 ? 0 : v).toFixed(3);
+}
+
+function sheetToDXF(sh){
+  var o = [];
+  function p(c, v){ o.push(String(c)); o.push(String(v)); }
+
+  var b = sh.bbox, m = sh.pad * 2;
+
+  /* HEADER */
+  p(0,'SECTION'); p(2,'HEADER');
+  p(9,'$ACADVER'); p(1,'AC1009');
+  p(9,'$INSUNITS'); p(70,4);          /* 4 = 毫米 */
+  p(9,'$MEASUREMENT'); p(70,1);
+  p(9,'$EXTMIN'); p(10,dxfNum(b.x0-m)); p(20,dxfNum(b.y0-m)); p(30,'0.0');
+  p(9,'$EXTMAX'); p(10,dxfNum(b.x1+m)); p(20,dxfNum(b.y1+m)); p(30,'0.0');
+  p(0,'ENDSEC');
+
+  /* TABLES */
+  p(0,'SECTION'); p(2,'TABLES');
+
+  p(0,'TABLE'); p(2,'LTYPE'); p(70,2);
+  p(0,'LTYPE'); p(2,'CONTINUOUS'); p(70,0); p(3,'Solid line'); p(72,65); p(73,0); p(40,'0.0');
+  p(0,'LTYPE'); p(2,'DASHED'); p(70,0); p(3,'Dashed __ __ __'); p(72,65); p(73,2); p(40,'0.75');
+  p(49,'0.5'); p(49,'-0.25');
+  p(0,'ENDTAB');
+
+  var layers = [
+    ['0',7,'CONTINUOUS'], ['OUTLINE',7,'CONTINUOUS'], ['THIN',8,'CONTINUOUS'],
+    ['GLASS',4,'CONTINUOUS'], ['HIDDEN',8,'DASHED'], ['DIM',1,'CONTINUOUS'],
+    ['TEXT',3,'CONTINUOUS'], ['FRAME',7,'CONTINUOUS']
+  ];
+  p(0,'TABLE'); p(2,'LAYER'); p(70,layers.length);
+  layers.forEach(function(l){
+    p(0,'LAYER'); p(2,l[0]); p(70,0); p(62,l[1]); p(6,l[2]);
+  });
+  p(0,'ENDTAB');
+
+  p(0,'TABLE'); p(2,'STYLE'); p(70,1);
+  p(0,'STYLE'); p(2,'STANDARD'); p(70,0); p(40,'0.0'); p(41,'1.0'); p(50,'0.0');
+  p(71,0); p(42,'2.5'); p(3,'txt.shx'); p(4,'gbcbig.shx');
+  p(0,'ENDTAB');
+
+  p(0,'ENDSEC');
+
+  /* ENTITIES */
+  p(0,'SECTION'); p(2,'ENTITIES');
+  sh.items.forEach(function(it){
+    if(it.t === 'line'){
+      p(0,'LINE'); p(8,it.layer);
+      p(10,dxfNum(it.x1)); p(20,dxfNum(it.y1)); p(30,'0.0');
+      p(11,dxfNum(it.x2)); p(21,dxfNum(it.y2)); p(31,'0.0');
+    } else if(it.t === 'rect'){
+      var lay = it.dash ? 'HIDDEN' : it.layer;
+      [[it.x0,it.y0,it.x1,it.y0],[it.x1,it.y0,it.x1,it.y1],
+       [it.x1,it.y1,it.x0,it.y1],[it.x0,it.y1,it.x0,it.y0]].forEach(function(q){
+        p(0,'LINE'); p(8,lay);
+        p(10,dxfNum(q[0])); p(20,dxfNum(q[1])); p(30,'0.0');
+        p(11,dxfNum(q[2])); p(21,dxfNum(q[3])); p(31,'0.0');
+      });
+    } else if(it.t === 'tri'){
+      p(0,'POLYLINE'); p(8,it.layer); p(66,1); p(70,1);
+      it.pts.forEach(function(pt){
+        p(0,'VERTEX'); p(8,it.layer);
+        p(10,dxfNum(pt[0])); p(20,dxfNum(pt[1])); p(30,'0.0');
+      });
+      p(0,'SEQEND');
+    } else if(it.t === 'text'){
+      var s = it.sa || '';
+      if(!/^[\x20-\x7E]*$/.test(s) || !s) s = '';
+      if(!s) return;                       /* 非 ASCII 一律不写，避免 CAD 里变乱码 */
+      var ty = it.y - it.h * 0.35;
+      p(0,'TEXT'); p(8,it.layer);
+      p(10,dxfNum(it.x)); p(20,dxfNum(ty)); p(30,'0.0');
+      p(40,dxfNum(it.h)); p(1,s);
+      if(it.align === 'center'){ p(72,1); p(11,dxfNum(it.x)); p(21,dxfNum(ty)); p(31,'0.0'); }
+      if(it.rot) p(50,String(it.rot));
+    }
+  });
+  p(0,'ENDSEC');
+  p(0,'EOF');
+
+  return o.join('\r\n');
 }
 
 /* =========================================================
@@ -1034,6 +1226,20 @@ function exportSVG(){
   download('CAD_' + d.code + '_' + params.W + 'x' + params.D + 'x' + params.H + '.svg', src, 'image/svg+xml;charset=utf-8');
 }
 
+function exportDXF(){
+  if(!SHEET) return;
+  var txt = sheetToDXF(SHEET);
+  var d = TYPES[params.type];
+  download('CAD_' + d.code + '_' + params.W + 'x' + params.D + 'x' + params.H + '.dxf',
+           txt, 'application/dxf;charset=utf-8');
+  var note = document.getElementById('dxfTip');
+  if(note){
+    note.textContent = '已导出 ' + params.W + '\u00d7' + params.D + '\u00d7' + params.H +
+      ' mm \u00b7 1:1 \u771f\u5b9e\u5c3a\u5bf8 \u00b7 \u53cc\u51fb\u6587\u4ef6\u7528 CAD \u6253\u5f00';
+    note.style.display = 'block';
+  }
+}
+
 function exportPNG(){
   var a = document.createElement('a');
   a.href = cv.toDataURL('image/png');
@@ -1120,6 +1326,7 @@ function init(){
   });
   $('btnPng').addEventListener('click', exportPNG);
   $('btnSvg').addEventListener('click', exportSVG);
+  $('btnDxf').addEventListener('click', exportDXF);
   $('btnPrint').addEventListener('click', function(){ window.print(); });
 
   var ro = new ResizeObserver(function(){ render3D(); });

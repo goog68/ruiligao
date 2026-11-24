@@ -60,6 +60,18 @@ npx serve .
 
 然后访问 `http://localhost:8080`。
 
+## 导出 DXF，用桌面 CAD 打开
+
+右上「CAD 工程图」卡片里有 **导出 DXF**。文件按 **1:1 真实毫米**绘制，AutoCAD / 中望CAD / 浩辰 / LibreCAD 双击即可打开，量出来的尺寸就是实际尺寸。
+
+- 格式：DXF R12（AC1009），兼容性最好的版本
+- 图层：`OUTLINE` 轮廓 / `THIN` 细线 / `GLASS` 玻璃 / `HIDDEN` 虚线 / `DIM` 尺寸 / `TEXT` 文字 / `FRAME` 图框
+- 单位：`$INSUNITS = 4`（毫米）
+- 投影：第一角法（俯视图在主视图下方、侧视图在右侧，GB 制图习惯）
+- 文字：DXF 内部只用英文（`FRONT VIEW` / `SHELF` / `RUILIGAO DISPLAY TECH`），避免中文在 CAD 里变乱码；屏幕上的 SVG 和打印保留中文
+
+打开前先装 CAD：中望CAD 个人版（免费）、浩辰、AutoCAD、LibreCAD（开源免费）都行。
+
 ## 技术说明
 
 - 单文件 `index.html`，无任何第三方库、无需联网（离线可用）
