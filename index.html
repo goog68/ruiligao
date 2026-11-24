@@ -94,6 +94,23 @@
   .meta b{color:var(--accent2);font-weight:650}
   .meta .row{display:flex;justify-content:space-between;gap:8px}
   .meta .row span:last-child{color:#0f172a;font-weight:600}
+  /* ---------- 图片识别 ---------- */
+  .dz{
+    position:relative;min-height:104px;border:1.5px dashed #b9cfdc;border-radius:10px;background:#fbfdfe;
+    display:grid;place-items:center;cursor:pointer;overflow:hidden;transition:.16s;text-align:center;padding:10px;
+  }
+  .dz:hover,.dz.over{border-color:var(--accent);background:#f0fbfa}
+  .dz.over{box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+  .dz b{display:block;font-size:12.5px;color:#1f3b4a;font-weight:650;margin-top:4px}
+  .dz span{display:block;font-size:10.5px;color:#94a3b8;margin-top:2px;line-height:1.35}
+  #dzPreview{display:none;width:66px;height:66px;flex:none;object-fit:contain;background:#fff;
+    border:1px solid #e2edf1;border-radius:7px}
+  .dz.hasimg{display:flex;align-items:center;gap:10px;text-align:left;padding:9px;border-style:solid;border-color:#d7e6ec}
+  .dz.hasimg #dzInner{display:none}
+  .dz.hasimg #dzPreview{display:block}
+  .dz-note{display:none;font-size:10.5px;line-height:1.5;color:#3d5766}
+  .dz.hasimg .dz-note{display:block}
+  .dz-note em{font-style:normal;color:var(--accent2);font-weight:650}
   /* ---------- viewports ---------- */
   .view-body{flex:1;min-height:0;position:relative}
   #cv3d{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
@@ -135,6 +152,24 @@
   <aside class="card">
     <div class="card-head"><h2>识别与参数</h2><span class="tag" id="typeTag">展示架</span></div>
     <div class="panel-body">
+      <div>
+        <p class="block-title">丢图出图</p>
+        <div class="dz" id="dz">
+          <input type="file" id="fileInput" accept="image/*" hidden>
+          <div id="dzInner">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16V4"></path><path d="M7 9l5-5 5 5"></path>
+              <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"></path>
+            </svg>
+            <b>把产品图丢进来</b>
+            <span>自动认层数与高宽比 · 或点此选文件</span>
+          </div>
+          <img id="dzPreview" alt="">
+          <div class="dz-note" id="dzNote"></div>
+        </div>
+      </div>
+
       <div>
         <p class="block-title">结构参数（mm）</p>
         <div class="fields">
@@ -401,7 +436,7 @@ function buildModel(p){
    ========================================================= */
 var cv = document.getElementById('cv3d');
 var ctx = cv.getContext('2d');
-var view = {yaw:-0.62, pitch:0.40, zoom:1, spin:false};
+var view = {yaw:-0.62, pitch:0.30, zoom:1, spin:false};
 var rafId = null;
 
 function faceList(boxes){
@@ -448,9 +483,9 @@ function render3D(){
 
   var W = params.W, D = params.D, H = params.H;
   var radius = Math.sqrt(W*W/4 + D*D/4 + H*H/4) || 1;
-  var dist = radius * 2.42 / view.zoom;
-  var focal = Math.min(w,h) * 1.12;
-  var cx = w/2, cy = h/2 + Math.min(h*0.05, 22);
+  var dist = radius * 7.2 / view.zoom;
+  var focal = Math.min(w,h) * 3.3;
+  var cx = w/2, cy = h*0.49;
   var cosY = Math.cos(view.yaw), sinY = Math.sin(view.yaw);
   var cosP = Math.cos(view.pitch), sinP = Math.sin(view.pitch);
 
@@ -782,6 +817,148 @@ function generate(){
   updateMeta();
 }
 
+/* =========================================================
+   6.5 图片识别：丢一张产品图，反推结构类型 / 层数 / 高宽比
+   单张图没有深度信息，所以只取「比例 + 结构特征」，
+   绝对尺寸由高度基准换算 —— 这是工程上唯一靠谱的用法。
+   ========================================================= */
+var imgRatio = null;
+
+function analyzeImage(img){
+  var maxSide = 560;
+  var sc = Math.min(1, maxSide / Math.max(img.width, img.height));
+  var w = Math.max(8, Math.round(img.width * sc));
+  var h = Math.max(8, Math.round(img.height * sc));
+  var c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  var g = c.getContext('2d', {willReadFrequently:true});
+  g.drawImage(img, 0, 0, w, h);
+  var d;
+  try { d = g.getImageData(0, 0, w, h).data; } catch(e){ return null; }
+
+  /* 背景色：四角取样取中位数 */
+  var samples = [];
+  [[0,0],[w-10,0],[0,h-10],[w-10,h-10]].forEach(function(p){
+    for(var yy=0; yy<10; yy++){
+      for(var xx=0; xx<10; xx++){
+        var X = Math.min(w-1, Math.max(0, p[0]+xx)), Y = Math.min(h-1, Math.max(0, p[1]+yy));
+        var i = (Y*w + X) * 4;
+        samples.push([d[i], d[i+1], d[i+2]]);
+      }
+    }
+  });
+  samples.sort(function(a,b){ return (a[0]+a[1]+a[2]) - (b[0]+b[1]+b[2]); });
+  var bg = samples[Math.floor(samples.length/2)] || [255,255,255];
+
+  /* 前景掩码 + 包围盒 */
+  var mask = new Uint8Array(w*h);
+  var minX = w, maxX = -1, minY = h, maxY = -1, fg = 0;
+  for(var y=0; y<h; y++){
+    for(var x=0; x<w; x++){
+      var i2 = (y*w + x) * 4;
+      if(d[i2+3] < 20) continue;
+      var dr = d[i2] - bg[0], dg = d[i2+1] - bg[1], db = d[i2+2] - bg[2];
+      if(Math.sqrt(dr*dr + dg*dg + db*db) > 34){
+        mask[y*w + x] = 1; fg++;
+        if(x < minX) minX = x;
+        if(x > maxX) maxX = x;
+        if(y < minY) minY = y;
+        if(y > maxY) maxY = y;
+      }
+    }
+  }
+  if(fg < w*h*0.015 || maxX < 0) return null;
+
+  var bw = maxX - minX + 1, bh = maxY - minY + 1;
+  if(bw < 12 || bh < 12) return null;
+  var fill = fg / (bw * bh);
+
+  /* 逐行前景宽度：层板是横向通长，会形成宽度峰值 */
+  var counts = [];
+  for(var y2=minY; y2<=maxY; y2++){
+    var n = 0;
+    for(var x2=minX; x2<=maxX; x2++) if(mask[y2*w + x2]) n++;
+    counts.push(n);
+  }
+  var sm = counts.map(function(v, idx){
+    var s = 0, k2 = 0;
+    for(var k=-2; k<=2; k++){
+      var j = idx + k;
+      if(j >= 0 && j < counts.length){ s += counts[j]; k2++; }
+    }
+    return s / k2;
+  });
+  var maxC = Math.max.apply(null, sm) || 1;
+  var th = maxC * 0.86;
+  var segs = [], inSeg = false, start = 0;
+  for(var m=0; m<sm.length; m++){
+    var on = sm[m] >= th;
+    if(on && !inSeg){ inSeg = true; start = m; }
+    if((!on || m === sm.length-1) && inSeg){
+      inSeg = false;
+      segs.push((start + m) / 2);
+    }
+  }
+  var merged = [];
+  segs.forEach(function(s){
+    if(merged.length && Math.abs(s - merged[merged.length-1]) < bh*0.025) return;
+    merged.push(s);
+  });
+
+  /* 结构判断：宽扁 → 台；实心 → 柜；镂空 → 架 */
+  var ratio = bw / bh;
+  var type = 'rack';
+  if(ratio > 1.35) type = 'table';
+  else if(fill >= 0.66) type = 'cabinet';
+  else type = 'rack';
+
+  var layers = clamp(merged.length, 1, 8);
+  if(fill >= 0.66) layers = clamp(layers, 2, 6);   /* 实心体不要被误判成几十层 */
+  if(type === 'rack' && layers >= 3) layers -= 1;  /* 最底那条通长线是底座，不算层板 */
+
+  var edge = (minX < 2 || minY < 2 || maxX > w-3 || maxY > h-3);
+
+  return {type:type, ratio:ratio, layers:layers, fill:fill, edge:edge, bw:bw, bh:bh};
+}
+
+function applyImageResult(r){
+  var d = TYPES[r.type];
+  imgRatio = r.ratio;
+  params.type = r.type;
+  params.H = clamp(round5(d.defH), 100, 4000);
+  params.W = clamp(round5(params.H * r.ratio), 120, 6000);
+  params.D = clamp(round5(params.W * 0.62), 80, 3000);
+  params.layers = clamp(r.layers, 1, 8);
+  params.t = params.t || 15;
+  syncInputs();
+  generate();
+}
+
+function handleImageFile(file){
+  if(!file || !/^image\//.test(file.type)) return;
+  var url = URL.createObjectURL(file);
+  var img = new Image();
+  img.onload = function(){
+    var dz = $('dz'), pre = $('dzPreview'), note = $('dzNote');
+    pre.src = url;
+    dz.classList.add('hasimg');
+    var r = null;
+    try { r = analyzeImage(img); } catch(e){ r = null; }
+    if(!r){
+      note.innerHTML = '<em>没认出轮廓</em>：请换白底产品图，或直接填参数';
+      return;
+    }
+    applyImageResult(r);
+    note.innerHTML = '识别 <em>' + TYPES[r.type].label + '</em> · ' + params.layers +
+      ' 层 · 高宽比 ' + r.ratio.toFixed(2) + ' · H' + params.H + ' / W' + params.W +
+      (r.edge ? ' · 图片贴边，建议留白' : '');
+  };
+  img.onerror = function(){
+    $('dzNote').innerHTML = '<em>图片读不了</em>：换个格式试试';
+  };
+  img.src = url;
+}
+
 /* 一句话 */
 function runSentence(){
   var text = $('q').value.trim();
@@ -795,13 +972,20 @@ function runSentence(){
 }
 
 /* 参数面板 */
-function readInputs(){
+function readInputs(ev){
+  var fromId = ev && ev.target ? ev.target.id : '';
   params.type = $('pType').value;
-  params.W = clamp(round5(+$('pW').value || TYPES[params.type].defW), 120, 6000);
   params.D = clamp(round5(+$('pD').value || 300), 80, 3000);
   params.H = clamp(round5(+$('pH').value || 600), 100, 4000);
   params.layers = clamp(Math.round(+$('pLayers').value || 1), 1, 8);
   params.t = clamp(round5(+$('pT').value || 15), 5, 40);
+  if(fromId === 'pH' && imgRatio){
+    /* 图给比例、你给高度 —— 宽度自动跟着走 */
+    params.W = clamp(round5(params.H * imgRatio), 120, 6000);
+    $('pW').value = params.W;
+  } else {
+    params.W = clamp(round5(+$('pW').value || TYPES[params.type].defW), 120, 6000);
+  }
   generate();
 }
 
@@ -889,13 +1073,43 @@ function init(){
   $('go').addEventListener('click', runSentence);
   $('q').addEventListener('keydown', function(e){ if(e.key === 'Enter') runSentence(); });
 
+  /* 图片：点击 / 拖拽 / 粘贴，三种都能丢进来 */
+  var dz = $('dz'), fi = $('fileInput');
+  dz.addEventListener('click', function(){ fi.click(); });
+  fi.addEventListener('change', function(){
+    if(fi.files && fi.files[0]) handleImageFile(fi.files[0]);
+    fi.value = '';
+  });
+  ['dragenter','dragover'].forEach(function(t){
+    dz.addEventListener(t, function(e){ e.preventDefault(); dz.classList.add('over'); });
+  });
+  ['dragleave','drop'].forEach(function(t){
+    dz.addEventListener(t, function(e){ e.preventDefault(); dz.classList.remove('over'); });
+  });
+  dz.addEventListener('drop', function(e){
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) handleImageFile(f);
+  });
+  window.addEventListener('dragover', function(e){ e.preventDefault(); });
+  window.addEventListener('drop', function(e){ e.preventDefault(); });
+  document.addEventListener('paste', function(e){
+    var items = e.clipboardData && e.clipboardData.items;
+    if(!items) return;
+    for(var i=0;i<items.length;i++){
+      if(items[i].type.indexOf('image') === 0){
+        handleImageFile(items[i].getAsFile());
+        break;
+      }
+    }
+  });
+
   ['pType','pW','pD','pH','pLayers','pT'].forEach(function(id){
     $(id).addEventListener('input', readInputs);
     $(id).addEventListener('change', readInputs);
   });
 
   $('btnReset').addEventListener('click', function(){
-    view.yaw = -0.62; view.pitch = 0.40; view.zoom = 1;
+    view.yaw = -0.62; view.pitch = 0.30; view.zoom = 1;
     render3D();
   });
   $('btnSpin').addEventListener('click', function(){
