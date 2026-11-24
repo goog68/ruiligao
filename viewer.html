@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图纸查看器 · 瑞利高</title>
+<style>
+  :root{
+    --bg:#eef3f7; --card:#ffffff; --line:#dbe6ee; --ink:#0f172a; --mute:#64748b;
+    --accent:#0d9488; --accent2:#0f766e;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:"Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    height:56px; flex:none; display:flex; align-items:center; gap:12px; padding:0 16px;
+    background:var(--card); border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:.2px}
+  .mark{
+    width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800;
+    background:linear-gradient(140deg,#14b8a6,#0e7490);
+  }
+  .brand small{display:block;font-size:10.5px;color:var(--mute);font-weight:500;letter-spacing:0}
+  .fname{
+    font-size:12.5px;color:#334155;background:#f4f8fb;border:1px solid var(--line);
+    border-radius:999px;padding:5px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .badge{
+    font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+    border-radius:6px;padding:3px 8px;letter-spacing:.4px;
+  }
+  .badge.warn{background:#d97706}
+  .spacer{flex:1}
+  button.btn{
+    height:32px;padding:0 13px;border-radius:8px;border:1px solid var(--line);background:#fff;
+    color:#1e3a48;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s;
+    font-family:inherit;
+  }
+  button.btn:hover{border-color:#9fd3cd;background:#f2fbfa;color:var(--accent2)}
+  button.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.btn.primary:hover{background:var(--accent2)}
+  main{flex:1;display:flex;min-height:0}
+  aside{
+    width:250px;flex:none;background:var(--card);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0;
+  }
+  .sec{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .sec h4{margin:0 0 9px;font-size:11px;letter-spacing:.6px;color:var(--mute);font-weight:700;text-transform:uppercase}
+  .info{font-size:12px;color:#334155;line-height:1.85}
+  .info b{color:var(--ink);font-weight:650}
+  .layers{flex:1;overflow:auto;padding:8px 10px}
+  .lay{
+    display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:12.5px;
+  }
+  .lay:hover{background:#f4fafb}
+  .lay input{accent-color:var(--accent);cursor:pointer}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.15)}
+  .lay span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cnt{margin-left:auto;font-size:10.5px;color:#94a3b8;font-variant-numeric:tabular-nums}
+  .stage{flex:1;position:relative;min-width:0;overflow:hidden;background:#fff}
+  #cv{display:block;width:100%;height:100%;cursor:grab}
+  #cv.drag{cursor:grabbing}
+  #imgWrap{position:absolute;inset:0;overflow:hidden;display:none;background:#f8fafc}
+  #imgWrap img{position:absolute;transform-origin:0 0;image-rendering:auto;box-shadow:0 6px 30px rgba(15,23,42,.12)}
+  #fileInput{display:none}
+  .drop{
+    position:absolute;inset:0;display:grid;place-items:center;text-align:center;
+    background:rgba(238,243,247,.97);z-index:5;padding:30px;
+  }
+  .drop.over{background:rgba(13,148,136,.08)}
+  .drop .inner{max-width:560px}
+  .drop h2{margin:0 0 10px;font-size:19px}
+  .drop p{margin:0 0 16px;color:var(--mute);font-size:13px;line-height:1.9}
+  .formats{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin:18px 0 4px}
+  .formats i{
+    font-style:normal;font-size:11px;font-weight:700;letter-spacing:.5px;padding:5px 9px;border-radius:6px;
+    background:#e6f2f5;color:#12606f;
+  }
+  .formats i.off{background:#fef3c7;color:#92400e}
+  .tip{
+    position:absolute;left:14px;bottom:12px;font-size:11.5px;color:#64748b;
+    background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:7px;padding:6px 10px;
+    z-index:3;line-height:1.6;max-width:70%;
+  }
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);
+    background:#0f172a;color:#fff;font-size:12.5px;padding:9px 16px;border-radius:9px;
+    opacity:0;transition:.25s;pointer-events:none;z-index:99;
+  }
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><div class="mark">RLG</div><div>图纸查看器<small>DXF / SVG / PDF / 图片</small></div></div>
+  <span class="fname" id="fname">未打开文件</span>
+  <span class="badge" id="badge" style="display:none"></span>
+  <div class="spacer"></div>
+  <button class="btn" id="btnOpen">打开图纸</button>
+  <button class="btn" id="btnFit">适应窗口</button>
+  <button class="btn" id="btnBg">切换底色</button>
+  <button class="btn" id="btnPng">导出 PNG</button>
+  <input type="file" id="fileInput" accept=".dxf,.svg,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.dwg">
+</header>
+
+<main>
+  <aside>
+    <div class="sec">
+      <h4>图纸信息</h4>
+      <div class="info" id="info">_</div>
+    </div>
+    <div class="sec" style="padding-bottom:8px">
+      <h4>图层（点击切换显隐）</h4>
+    </div>
+    <div class="layers" id="layers"></div>
+  </aside>
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div id="imgWrap"><img id="imgView" alt=""></div>
+    <div class="tip" id="tip">拖拽平移 · 滚轮缩放 · 双击适应窗口</div>
+    <div class="drop" id="drop">
+      <div class="inner">
+        <h2>把图纸拖进来</h2>
+        <p>支持直接读取 DXF 并分图层显示，也能打开 SVG、PDF、PNG、JPG。<br>DWG 是压缩的二进制格式，浏览器读不了，需先按下方说明转成 DXF。</p>
+        <div class="formats">
+          <i>DXF</i><i>SVG</i><i>PDF</i><i>PNG</i><i>JPG</i><i class="off">DWG 需转换</i>
+        </div>
+        <p style="margin-top:18px;font-size:12px">
+          DWG 转换：把文件拖到 <b>D:\瑞利高设计工具\把DWG转成DXF.bat</b> 上即可，
+          转出的 DXF 再拖回这里。
+        </p>
+      </div>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   图纸查看器 —— 纯前端，无依赖
+   · DXF：自写解析器，支持 LINE/CIRCLE/ARC/LWPOLYLINE/POLYLINE/
+           TEXT/MTEXT/SOLID/POINT，并递归展开 INSERT 与 DIMENSION 块
+   · SVG/PDF/图片：按图像查看，支持平移缩放
+   ===================================================================== */
+var $ = function(id){ return document.getElementById(id); };
+var cv = $('cv'), ctx = cv.getContext('2d');
+var stage = $('stage');
+
+var state = {
+  mode: 'empty',           /* empty | dxf | image */
+  prims: [],               /* {t:'line',layer,x1,y1,x2,y2} 等，世界坐标 mm，y 向上 */
+  layers: {},              /* name -> {on:true, color:'#..', n:0} */
+  bbox: null,
+  view: {k:1, tx:0, ty:0},
+  dark: false
+};
+
+/* ---------------- ACI 颜色 ---------------- */
+var ACI = {
+  1:'#e11d48', 2:'#ca8a04', 3:'#16a34a', 4:'#0891b2', 5:'#2563eb',
+  6:'#c026d3', 7:'#1f2937', 8:'#64748b', 9:'#94a3b8'
+};
+function aci(n, dark){
+  if(!n) return dark ? '#e2e8f0' : '#1f2937';
+  if(n === 7) return dark ? '#e2e8f0' : '#1f2937';
+  return ACI[n] || (dark ? '#cbd5e1' : '#334155');
+}
+
+/* ---------------- DXF 解析 ---------------- */
+function parsePairs(text){
+  var L = text.split(/\r\n|\r|\n/), out = [];
+  for(var i=0; i+1 < L.length; i += 2){
+    var c = parseInt(L[i].trim(), 10);
+    if(isNaN(c)) continue;
+    out.push([c, L[i+1]]);
+  }
+  return out;
+}
+
+function parseDXF(text){
+  var P = parsePairs(text);
+  var i, code, val;
+
+  /* 版本 */
+  var ver = '';
+  for(i=0;i<P.length-1;i++){ if(P[i][0]===9 && P[i][1].trim()==='$ACADVER'){ ver = (P[i+1][1]||'').trim(); break; } }
+
+  /* 分节 */
+  var blocks = {}, ents = [];
+  var sec = '', cur = null, block = null, poly = null;
+
+  function entProps(start){
+    var o = {type:'', layer:'0', color:null, vals:{}, verts:[]};
+    var j = start;
+    while(j < P.length && !(P[j][0] === 0)){
+      var c = P[j][0], v = P[j][1];
+      if(c === 8) o.layer = v.trim();
+      else if(c === 62) o.color = parseInt(v, 10);
+      else if(c === 2) o.name = v.trim();
+      else if(c === 10) o.x = parseFloat(v);
+      else if(c === 20) o.y = parseFloat(v);
+      else if(c === 11) o.x2 = parseFloat(v);
+      else if(c === 21) o.y2 = parseFloat(v);
+      else if(c === 12) o.x3 = parseFloat(v);
+      else if(c === 22) o.y3 = parseFloat(v);
+      else if(c === 13) o.x4 = parseFloat(v);
+      else if(c === 23) o.y4 = parseFloat(v);
+      else if(c === 40) o.r = parseFloat(v);
+      else if(c === 41) o.sx = parseFloat(v);
+      else if(c === 42) o.sy = parseFloat(v);
+      else if(c === 50) o.a1 = parseFloat(v);
+      else if(c === 51) o.a2 = parseFloat(v);
+      else if(c === 1) o.text = v;
+      else if(c === 3) o.text = (o.text||'') + v;
+      else if(c === 70) o.flag = parseInt(v, 10);
+      else if(c === 90) o.count = parseInt(v, 10);
+      j++;
+    }
+    return {o:o, next:j};
+  }
+
+  for(i=0; i<P.length; i++){
+    code = P[i][0]; val = P[i][1];
+    if(code === 0){
+      var t = val.trim();
+      if(t === 'SECTION'){ sec = ''; continue; }
+      if(t === 'ENDSEC'){ sec = ''; block = null; continue; }
+      if(t === 'BLOCK'){ block = {name:'', base:{x:0,y:0}, ents:[], header:true}; continue; }
+      if(t === 'ENDBLK'){ if(block) blocks[block.name] = block; block = null; continue; }
+      if(t === 'POLYLINE'){ poly = {t:'poly', layer:'0', pts:[], flag:0, color:null}; (block?block.ents:ents).push(poly); continue; }
+      if(t === 'VERTEX'){ cur = 'VERTEX'; continue; }
+      if(t === 'SEQEND'){ poly = null; continue; }
+      if(t === 'TEXT' || t === 'MTEXT' || t === 'LINE' || t === 'CIRCLE' || t === 'ARC' ||
+         t === 'LWPOLYLINE' || t === 'SOLID' || t === 'TRACE' || t === 'POINT' ||
+         t === 'INSERT' || t === 'DIMENSION'){
+        var pr = entProps(i+1);
+        var o = pr.o; o.type = t;
+        if(block) block.header = false;
+        /* 顶点 / 文本续行都可能在 0 组之前 */
+        (block?block.ents:ents).push(o);
+        if(t === 'LWPOLYLINE'){
+          /* 搜集 10/20 对（可能有多个） */
+          var j = i+1, pts = [];
+          while(j < P.length && P[j][0] !== 0){
+            if(P[j][0] === 10){ var xx = parseFloat(P[j][1]);
+              var yy = 0, k2 = j+1;
+              while(k2 < P.length && P[k2][0] !== 0 && P[k2][0] !== 10){ if(P[k2][0]===20) yy = parseFloat(P[k2][1]); k2++; }
+              pts.push([xx, yy]);
+            }
+            j++;
+          }
+          o.pts = pts;
+        }
+        i = pr.next - 1;
+        continue;
+      }
+    }
+    /* 块头信息 / 顶点坐标 */
+    if(block && block.header){
+      if(code === 2) block.name = val.trim();
+      else if(code === 10) block.base.x = parseFloat(val) || 0;
+      else if(code === 20) block.base.y = parseFloat(val) || 0;
+    }
+    if(cur === 'VERTEX' && poly){
+      if(code === 10) poly._x = parseFloat(val);
+      if(code === 20){ poly.pts.push([poly._x||0, parseFloat(val)]); }
+    }
+  }
+
+  return {ver:ver, ents:ents, blocks:blocks};
+}
+
+/* ---------------- 变换 / 展开 ----------------
+   xf 表示 p -> R(rot)·S(sx,sy)·p + t，嵌套时用 composeXf 复合。 */
+function mkXf(x){ return x || {sx:1, sy:1, rot:0, ox:0, oy:0}; }
+function linXf(p, xf){
+  var x = p[0] * (xf.sx||1), y = p[1] * (xf.sy||1);
+  var c = Math.cos(xf.rot||0), s = Math.sin(xf.rot||0);
+  return [x*c - y*s, x*s + y*c];
+}
+function applyXf(p, xf){
+  var q = linXf(p, xf);
+  return [q[0] + (xf.ox||0), q[1] + (xf.oy||0)];
+}
+function composeXf(o, n){
+  o = mkXf(o); n = mkXf(n);
+  var q = linXf([n.ox||0, n.oy||0], o);
+  return {
+    sx:(o.sx||1)*(n.sx||1), sy:(o.sy||1)*(n.sy||1),
+    rot:(o.rot||0)+(n.rot||0),
+    ox:q[0] + (o.ox||0), oy:q[1] + (o.oy||0)
+  };
+}
+
+function expand(ents, blocks, xf, out, depth){
+  xf = mkXf(xf); depth = depth || 0;
+  if(depth > 8) return;
+  ents.forEach(function(e){
+    var layer = e.layer || '0', color = e.color;
+    function push(o){ o.layer = layer; if(color) o.color = color; out.push(o); }
+    switch(e.type){
+      case 'line':
+      case 'LINE':
+        push({t:'line', p:applyXf([e.x||0,e.y||0], xf), q:applyXf([e.x2||0,e.y2||0], xf)});
+        break;
+      case 'CIRCLE':
+        var c0 = applyXf([e.x||0, e.y||0], xf);
+        push({t:'circle', c:c0, r:(e.r||0)*Math.abs(xf.sx||1)});
+        break;
+      case 'ARC':
+        var c1 = applyXf([e.x||0, e.y||0], xf);
+        push({t:'arc', c:c1, r:(e.r||0)*Math.abs(xf.sx||1),
+              a1:(e.a1||0)*Math.PI/180 + (xf.rot||0), a2:(e.a2||0)*Math.PI/180 + (xf.rot||0)});
+        break;
+      case 'poly':
+        var ps = (e.pts||[]).map(function(p){ return applyXf(p, xf); });
+        if(ps.length > 1) push({t:'poly', pts:ps, closed:!!(e.flag & 1 || e.flag & 512)});
+        break;
+      case 'LWPOLYLINE':
+        var ps2 = (e.pts||[]).map(function(p){ return applyXf(p, xf); });
+        if(ps2.length > 1) push({t:'poly', pts:ps2, closed:!!(e.flag & 1)});
+        break;
+      case 'SOLID': case 'TRACE':
+        var q = [applyXf([e.x||0,e.y||0],xf), applyXf([e.x2||0,e.y2||0],xf),
+                 applyXf([e.x4||0,e.y4||0],xf), applyXf([e.x3||0,e.y3||0],xf)];
+        push({t:'poly', pts:q, closed:true});
+        break;
+      case 'POINT':
+        push({t:'point', c:applyXf([e.x||0,e.y||0], xf)});
+        break;
+      case 'TEXT': case 'MTEXT':
+        var tp = applyXf([e.x||0, e.y||0], xf);
+        var h = (e.r || 2.5) * Math.abs(xf.sx||1);
+        var txt = String(e.text == null ? '' : e.text)
+          .replace(/\\P/g,' ').replace(/\\[A-Za-z][^;]*;/g,'').replace(/[{}]/g,'');
+        if(txt.trim()) push({t:'text', c:tp, h:h, s:txt, rot:(e.a1||0)*Math.PI/180 + (xf.rot||0), align:e.flag});
+        break;
+      case 'DIMENSION':
+        /* 标注的匿名块几何本来就在世界坐标里，不能再平移 */
+        var bd = blocks[e.name];
+        if(bd) expand(bd.ents, blocks, xf, out, depth + 1);
+        break;
+      case 'INSERT':
+        var b = blocks[e.name];
+        if(b){
+          var ang = (e.a1||0) * Math.PI/180;
+          var bsx = (e.sx || 1), bsy = (e.sy || 1);
+          var bb = [b.base.x || 0, b.base.y || 0];
+          /* 块内点 p：先缩放到块基点，再旋转，最后平移到插入点 */
+          var rsBase = linXf(bb, {sx:bsx, sy:bsy, rot:ang});
+          var inner = {
+            sx:bsx, sy:bsy, rot:ang,
+            ox:(e.x || 0) - rsBase[0],
+            oy:(e.y || 0) - rsBase[1]
+          };
+          expand(b.ents, blocks, composeXf(xf, inner), out, depth + 1);
+        }
+        break;
+    }
+  });
+}
+
+/* ---------------- 建图 ---------------- */
+function buildDXF(text, name){
+  var r = parseDXF(text);
+  var prims = [];
+  expand(r.ents, r.blocks, {sx:1,sy:1,rot:0,ox:0,oy:0}, prims, 0);
+
+  /* 收集图层 */
+  var layers = {};
+  prims.forEach(function(p){
+    var n = p.layer || '0';
+    if(!layers[n]) layers[n] = {on: !/^defpoints$/i.test(n), n:0, color:null};
+    layers[n].n++;
+  });
+  /* 图层颜色取实体里最常见色 */
+  var colorVote = {};
+  prims.forEach(function(p){
+    if(p.color){ (colorVote[p.layer] = colorVote[p.layer] || {})[p.color] = (colorVote[p.layer][p.color]||0)+1; }
+  });
+  Object.keys(colorVote).forEach(function(l){
+    var best = null, bc = -1;
+    for(var k in colorVote[l]) if(colorVote[l][k] > bc){ bc = colorVote[l][k]; best = +k; }
+    if(layers[l]) layers[l].color = best;
+  });
+
+  /* 范围 */
+  var x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  function add(x,y){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  prims.forEach(function(p){
+    if(p.t === 'line'){ add(p.p[0],p.p[1]); add(p.q[0],p.q[1]); }
+    else if(p.t === 'circle' || p.t === 'arc'){ add(p.c[0]-p.r, p.c[1]-p.r); add(p.c[0]+p.r, p.c[1]+p.r); }
+    else if(p.t === 'poly'){ p.pts.forEach(function(q){ add(q[0],q[1]); }); }
+    else if(p.t === 'text' || p.t === 'point'){ add(p.c[0], p.c[1]); }
+  });
+  if(!isFinite(x0)){ x0 = 0; y0 = 0; x1 = 100; y1 = 100; }
+
+  /* 过滤掉明显是解析残留的超远图元，避免整张图被撑爆 */
+  prims = prims.filter(function(p){
+    var pts = [];
+    if(p.t === 'line') pts = [p.p, p.q];
+    else if(p.t === 'circle' || p.t === 'arc' || p.t === 'point' || p.t === 'text') pts = [p.c];
+    else if(p.t === 'poly') pts = p.pts;
+    return pts.every(function(q){
+      return q && isFinite(q[0]) && isFinite(q[1]) && Math.abs(q[0]) < 1e6 && Math.abs(q[1]) < 1e6;
+    });
+  });
+
+  state.mode = 'dxf';
+  state.prims = prims;
+  state.layers = layers;
+  state.bbox = {x0:x0, y0:y0, x1:x1, y1:y1};
+  state.ver = r.ver;
+
+  $('imgWrap').style.display = 'none';
+  cv.style.display = 'block';
+  $('drop').style.display = 'none';
+
+  $('info').innerHTML =
+    '<div>格式 <b>DXF ' + escHtml(r.ver || '') + '</b></div>' +
+    '<div>实体 <b>' + prims.length + '</b> 个</div>' +
+    '<div>图层 <b>' + Object.keys(layers).length + '</b> 个</div>' +
+    '<div>范围 <b>' + Math.round(x1-x0) + ' × ' + Math.round(y1-y0) + '</b> mm</div>' +
+    '<div style="color:#94a3b8;margin-top:4px">单位按毫米；y 轴向上</div>';
+
+  renderLayers();
+  fit();
+}
+
+function renderLayers(){
+  var box = $('layers'); box.innerHTML = '';
+  var names = Object.keys(state.layers).sort(function(a,b){ return state.layers[b].n - state.layers[a].n; });
+  names.forEach(function(n){
+    var L = state.layers[n];
+    var row = document.createElement('label');
+    row.className = 'lay';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = L.on;
+    cb.addEventListener('change', function(){ L.on = cb.checked; drawDXF(); });
+    var dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = L.color ? aci(L.color, state.dark) : (n === 'Defpoints' ? '#cbd5e1' : '#0f766e');
+    var sp = document.createElement('span'); sp.textContent = n;
+    var cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.textContent = L.n;
+    row.appendChild(cb); row.appendChild(dot); row.appendChild(sp); row.appendChild(cnt);
+    box.appendChild(row);
+  });
+}
+
+/* ---------------- 绘制 ---------------- */
+function resize(){
+  var r = stage.getBoundingClientRect();
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.max(10, Math.round(r.width * dpr));
+  cv.height = Math.max(10, Math.round(r.height * dpr));
+  cv.style.width = r.width + 'px';
+  cv.style.height = r.height + 'px';
+  state.dpr = dpr;
+}
+function fit(){
+  if(state.mode === 'image'){ fitImage(); return; }
+  if(!state.bbox) return;
+  resize();
+  var b = state.bbox, w = cv.width, h = cv.height;
+  var sx = (w*0.88) / Math.max(1, (b.x1-b.x0));
+  var sy = (h*0.88) / Math.max(1, (b.y1-b.y0));
+  var k = Math.min(sx, sy);
+  state.view.k = k;
+  state.view.tx = (w - (b.x1-b.x0)*k)/2 - b.x0*k;
+  state.view.ty = (h + (b.y1-b.y0)*k)/2 + b.y0*k;
+  drawDXF();
+}
+
+function drawDXF(){
+  if(state.mode !== 'dxf') return;
+  var w = cv.width, h = cv.height, v = state.view;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = state.dark ? '#0b1220' : '#ffffff';
+  ctx.fillRect(0,0,w,h);
+
+  ctx.setTransform(v.k, 0, 0, -v.k, v.tx, v.ty);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  var lw = Math.max(0.7, 1.05 / v.k * (state.dpr||1));
+  var prims = state.prims;
+
+  /* 按图层分组画，减少状态切换 */
+  var byLayer = {};
+  prims.forEach(function(p){
+    if(state.layers[p.layer] && !state.layers[p.layer].on) return;
+    (byLayer[p.layer] = byLayer[p.layer] || []).push(p);
+  });
+
+  Object.keys(byLayer).forEach(function(lname){
+    var L = state.layers[lname] || {};
+    var col = L.color ? aci(L.color, state.dark) : (state.dark ? '#cbd5e1' : '#243b53');
+    if(lname === 'Defpoints') col = state.dark ? '#334155' : '#e2e8f0';
+    ctx.strokeStyle = col;
+    ctx.fillStyle = col;
+    ctx.lineWidth = lw;
+
+    byLayer[lname].forEach(function(p){
+      if(p.t === 'line'){
+        ctx.beginPath(); ctx.moveTo(p.p[0], p.p[1]); ctx.lineTo(p.q[0], p.q[1]); ctx.stroke();
+      } else if(p.t === 'circle'){
+        ctx.beginPath(); ctx.arc(p.c[0], p.c[1], Math.max(0.2, p.r), 0, Math.PI*2); ctx.stroke();
+      } else if(p.t === 'arc'){
+        ctx.beginPath(); ctx.arc(p.c[0], p.c[1], Math.max(0.2, p.r), p.a1, p.a2); ctx.stroke();
+      } else if(p.t === 'poly'){
+        if(!p.pts.length) return;
+        ctx.beginPath();
+        ctx.moveTo(p.pts[0][0], p.pts[0][1]);
+        for(var i=1;i<p.pts.length;i++) ctx.lineTo(p.pts[i][0], p.pts[i][1]);
+        if(p.closed) ctx.closePath();
+        ctx.stroke();
+      } else if(p.t === 'point'){
+        ctx.beginPath(); ctx.arc(p.c[0], p.c[1], lw*1.6, 0, Math.PI*2); ctx.fill();
+      }
+    });
+  });
+
+  /* 文字单独用屏幕坐标画，避免被翻转 */
+  ctx.setTransform(1,0,0,1,0,0);
+  var tcol = state.dark ? '#e2e8f0' : '#1f2937';
+  prims.forEach(function(p){
+    if(p.t !== 'text') return;
+    if(state.layers[p.layer] && !state.layers[p.layer].on) return;
+    var sx = p.c[0]*v.k + v.tx, sy = -p.c[1]*v.k + v.ty;
+    var fs = Math.max(7, Math.min(260, p.h * v.k));
+    if(fs < 4.5) return;
+    ctx.save();
+    ctx.translate(sx, sy);
+    if(p.rot) ctx.rotate(-p.rot);
+    ctx.font = fs.toFixed(1) + 'px "Microsoft YaHei","SimSun",sans-serif';
+    ctx.fillStyle = tcol;
+    ctx.textAlign = (p.align === 1 || p.align === 4) ? 'center' : 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(p.s, 0, 0);
+    ctx.restore();
+  });
+}
+
+/* ---------------- 图像 / PDF ---------------- */
+var imgState = {k:1, x:0, y:0, w:0, h:0};
+function showImage(url, name, kind){
+  state.mode = 'image';
+  cv.style.display = 'none';
+  var wrap = $('imgWrap'), img = $('imgView');
+  wrap.style.display = 'block';
+  $('drop').style.display = 'none';
+  img.onload = function(){
+    imgState.w = img.naturalWidth; imgState.h = img.naturalHeight;
+    fitImage();
+  };
+  img.src = url;
+  $('info').innerHTML = '<div>类型 <b>' + escHtml(kind) + '</b></div>' +
+    '<div>滚轮缩放，拖拽平移</div>';
+  $('layers').innerHTML = '<div style="padding:10px;color:#94a3b8;font-size:12px">图像格式没有图层信息</div>';
+}
+function fitImage(){
+  var img = $('imgView');
+  var r = stage.getBoundingClientRect();
+  var k = Math.min(r.width*0.9/Math.max(1,imgState.w), r.height*0.9/Math.max(1,imgState.h));
+  imgState.k = k;
+  imgState.x = (r.width - imgState.w*k)/2;
+  imgState.y = (r.height - imgState.h*k)/2;
+  applyImg();
+}
+function applyImg(){
+  var img = $('imgView');
+  img.style.transform = 'translate(' + imgState.x + 'px,' + imgState.y + 'px) scale(' + imgState.k + ')';
+  img.style.width = imgState.w + 'px';
+  img.style.height = imgState.h + 'px';
+}
+
+/* ---------------- 打开文件 ---------------- */
+function toast(msg){
+  var t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(function(){ t.classList.remove('on'); }, 2200);
+}
+function escHtml(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+
+function openFile(f){
+  if(!f) return;
+  var name = f.name || '未命名';
+  var ext = (name.split('.').pop() || '').toLowerCase();
+  $('fname').textContent = name;
+  var badge = $('badge'); badge.style.display = '';
+
+  if(ext === 'dwg'){
+    badge.textContent = 'DWG'; badge.className = 'badge warn';
+    showDwgHelp(f);
+    return;
+  }
+  if(ext === 'dxf'){
+    badge.textContent = 'DXF'; badge.className = 'badge';
+    var rd = new FileReader();
+    rd.onload = function(){
+      try {
+        buildDXF(String(rd.result), name);
+        /* 顺便把图层颜色刷成当前底色 */
+        renderLayers();
+      } catch(e){
+        toast('DXF 解析失败：' + e.message);
+        console.error(e);
+      }
+    };
+    rd.readAsText(f, 'utf-8');
+    return;
+  }
+  if(ext === 'pdf'){
+    badge.textContent = 'PDF'; badge.className = 'badge';
+    var url = URL.createObjectURL(f);
+    window.open(url, '_blank');
+    $('info').innerHTML = '<div>PDF 已在新标签打开</div><div style="color:#94a3b8">浏览器内置阅读器可缩放</div>';
+    return;
+  }
+  if(/^(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(ext)){
+    badge.textContent = ext.toUpperCase(); badge.className = 'badge';
+    showImage(URL.createObjectURL(f), name, ext.toUpperCase());
+    return;
+  }
+  toast('这个格式暂时不支持：.' + ext);
+}
+
+function showDwgHelp(f){
+  $('drop').style.display = 'grid';
+  $('drop').innerHTML =
+    '<div class="inner">' +
+    '<h2>DWG 需要先转一下</h2>' +
+    '<p>DWG 是压缩二进制，浏览器无法直接读。这台机器上已经装好转换工具，两个办法任选：</p>' +
+    '<p style="text-align:left;background:#fff;border:1px solid #dbe6ee;border-radius:10px;padding:14px 16px">' +
+    '<b>办法一（最快）</b>：把 <b>' + escHtml(f.name) + '</b> 拖到<br>' +
+    '<code style="background:#e6f2f5;padding:2px 6px;border-radius:5px">D:\\瑞利高设计工具\\把DWG转成DXF.bat</code><br>' +
+    '同目录会生成同名 .dxf，再拖回本页面即可。<br><br>' +
+    '<b>办法二</b>：CAD 里「另存为 → AutoCAD 2007 DXF」，再拖进来。</p>' +
+    '<p style="font-size:12px;color:#94a3b8">转出来的 DXF 是矢量线框，可分层、可缩放、可量尺寸。</p>' +
+    '</div>';
+}
+
+/* ---------------- 交互 ---------------- */
+$('btnOpen').addEventListener('click', function(){ $('fileInput').click(); });
+$('fileInput').addEventListener('change', function(e){ if(e.target.files[0]) openFile(e.target.files[0]); });
+$('btnFit').addEventListener('click', fit);
+$('btnBg').addEventListener('click', function(){
+  state.dark = !state.dark;
+  stage.style.background = state.dark ? '#0b1220' : '#fff';
+  renderLayers();
+  if(state.mode === 'dxf') drawDXF();
+});
+$('btnPng').addEventListener('click', function(){
+  if(state.mode === 'dxf'){
+    var a = document.createElement('a');
+    a.download = 'drawing.png'; a.href = cv.toDataURL('image/png'); a.click();
+  } else if(state.mode === 'image'){
+    var a2 = document.createElement('a');
+    a2.download = 'image.png'; a2.href = $('imgView').src; a2.click();
+  } else toast('先打开一张图纸');
+});
+
+/* 拖放 */
+['dragenter','dragover'].forEach(function(ev){
+  window.addEventListener(ev, function(e){
+    e.preventDefault();
+    if($('drop').style.display !== 'none') $('drop').classList.add('over');
+    stage.classList.add('drag');
+  });
+});
+['dragleave','drop'].forEach(function(ev){
+  window.addEventListener(ev, function(e){
+    e.preventDefault();
+    $('drop').classList.remove('over'); stage.classList.remove('drag');
+  });
+});
+window.addEventListener('drop', function(e){
+  if(e.dataTransfer.files && e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]);
+});
+window.addEventListener('paste', function(e){
+  var items = e.clipboardData && e.clipboardData.items;
+  if(!items) return;
+  for(var i=0;i<items.length;i++){
+    if(items[i].type.indexOf('image') === 0){
+      var f = items[i].getAsFile();
+      if(f) openFile(f);
+      break;
+    }
+  }
+});
+
+/* 平移缩放 */
+var pan = null;
+stage.addEventListener('mousedown', function(e){
+  if(state.mode === 'empty') return;
+  pan = {x:e.clientX, y:e.clientY, tx:state.view.tx, ty:state.view.ty,
+         ix:imgState.x, iy:imgState.y};
+  stage.classList.add('drag');
+});
+window.addEventListener('mousemove', function(e){
+  if(!pan) return;
+  var dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+  if(state.mode === 'dxf'){
+    state.view.tx = pan.tx + dx * (state.dpr||1);
+    state.view.ty = pan.ty + dy * (state.dpr||1);
+    drawDXF();
+  } else if(state.mode === 'image'){
+    imgState.x = pan.ix + dx; imgState.y = pan.iy + dy; applyImg();
+  }
+});
+window.addEventListener('mouseup', function(){ pan = null; stage.classList.remove('drag'); });
+
+stage.addEventListener('wheel', function(e){
+  e.preventDefault();
+  var f = e.deltaY < 0 ? 1.12 : 1/1.12;
+  if(state.mode === 'dxf'){
+    var r = stage.getBoundingClientRect();
+    var mx = (e.clientX - r.left) * (state.dpr||1), my = (e.clientY - r.top) * (state.dpr||1);
+    var v = state.view;
+    v.tx = mx - (mx - v.tx) * f;
+    v.ty = my - (my - v.ty) * f;
+    v.k *= f;
+    drawDXF();
+  } else if(state.mode === 'image'){
+    var r2 = stage.getBoundingClientRect();
+    var mx2 = e.clientX - r2.left, my2 = e.clientY - r2.top;
+    imgState.x = mx2 - (mx2 - imgState.x) * f;
+    imgState.y = my2 - (my2 - imgState.y) * f;
+    imgState.k *= f;
+    applyImg();
+  }
+}, {passive:false});
+
+stage.addEventListener('dblclick', fit);
+window.addEventListener('resize', function(){ if(state.mode === 'dxf') fit(); else if(state.mode==='image') fitImage(); });
+
+/* 自适应初始 */
+function boot(){
+  resize();
+  var p = new URLSearchParams(location.search).get('file');
+  if(p){
+    fetch(p).then(function(r){ return r.text(); }).then(function(t){
+      $('fname').textContent = p.split('/').pop();
+      try { buildDXF(t, p); $('badge').style.display=''; $('badge').textContent='DXF'; } catch(e){ console.error(e); }
+    }).catch(function(){});
+  }
+}
+boot();
+</script>
+</body>
+</html>

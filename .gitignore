@@ -1,3 +1,4 @@
 *.png
 _s*
 __pycache__/
+.tools/

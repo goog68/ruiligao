@@ -219,6 +219,7 @@
         <button class="btn" id="btnDxf">导出 DXF</button>
         <button class="btn" id="btnSvg">导出 SVG</button>
         <button class="btn" id="btnPrint">打印</button>
+        <button class="btn" id="btnViewer" title="打开图纸查看器，可看 DXF / SVG / PDF / 图片">看图纸</button>
       </div>
     </div>
     <div class="cad-wrap"><div class="hint" id="dxfTip"></div><svg id="cadSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg></div>
@@ -238,16 +239,19 @@ var TYPES = {
   table:    {label:'亚克力展示台', code:'RLG-ST', en:'TABLE', defW:1000, defD:600, defH:900,  defL:1},
   box:      {label:'亚克力陈列盒', code:'RLG-HX', en:'DISPLAY BOX', defW:400, defD:300, defH:250,  defL:3},
   lightbox: {label:'亚克力灯箱',   code:'RLG-DX', en:'LIGHT BOX', defW:800, defD:120, defH:600,  defL:1},
-  tank:     {label:'亚克力槽体',   code:'RLG-CT', en:'TANK', defW:1200, defD:600, defH:500, defL:1}
+  tank:     {label:'亚克力槽体',   code:'RLG-CT', en:'TANK', defW:1200, defD:600, defH:500, defL:1},
+  vessel:   {label:'亚克力生长槽',   code:'RLG-SZ', en:'GROWTH TANK', defW:1090, defD:1250, defH:1850, defL:12}
 };
 
 var MAT = {
-  frame: {c:[203,231,240], a:0.97},
-  panel: {c:[221,241,247], a:0.93},
-  shelf: {c:[234,249,252], a:0.95},
-  glass: {c:[186,224,239], a:0.30},
+  frame: {c:[190,222,236], a:0.90},
+  panel: {c:[208,235,245], a:0.74},
+  shelf: {c:[232,247,251], a:0.90},
+  glass: {c:[168,212,232], a:0.20},
   light: {c:[255,238,186], a:0.97},
-  hidden:{c:[228,244,249], a:0.34}
+  hidden:{c:[228,244,249], a:0.34},
+  hole:  {c:[96,132,150], a:0.72},
+  pipe:  {c:[199,229,240], a:0.92}
 };
 
 var params = {type:'rack', W:600, D:400, H:1500, layers:3, t:15};
@@ -288,7 +292,8 @@ function parseSentence(raw){
   var p = {type:'rack', W:null, D:null, H:null, layers:null, t:null, note:[]};
 
   /* 类型 */
-  if(/生长槽|长生槽|养鱼槽|养殖槽|水槽|槽体|鱼缸|/i.test(s)) p.type = 'tank';
+  if(/生长槽|长生槽|培养槽|生长罐|长生罐|圆筒槽|圆柱槽|罐体|发酵罐/i.test(s)) p.type = 'vessel';
+  else if(/养鱼槽|养殖槽|水槽|槽体|鱼缸/i.test(s)) p.type = 'tank';
   else if(/灯箱|发光字|发光|招牌|logo\s*墙|背光/i.test(s)) p.type = 'lightbox';
   else if(/展柜|陈列柜|玻璃柜|柜子|柜/i.test(s)) p.type = 'cabinet';
   else if(/展示台|陈列台|台子|桌子|桌|台面/i.test(s)) p.type = 'table';
@@ -302,6 +307,9 @@ function parseSentence(raw){
   if(tri){ p.W = +tri[1]; p.D = +tri[2]; p.H = +tri[3]; p.note.push('三连尺寸 W×D×H'); }
 
   /* 「长」优先：槽体/水槽这类以「长×宽×高」标注 */
+  /* 生长槽：直径优先于宽 */
+  var diaV = grabNum(s, ['外径','筒体直径','直径','Φ','φ','DIA']);
+  if(diaV !== null && p.type === 'vessel' && p.W === null) p.W = diaV;
   var lenV = grabNum(s, ['长度','长']);
   if(lenV !== null && p.W === null){
     p.W = lenV;
@@ -324,6 +332,14 @@ function parseSentence(raw){
   var tm = s.match(/(?:板厚|厚度|厚)\s*(?:为|是|:)?\s*(\d+(?:\.\d+)?)\s*(?:毫米|mm)?/i);
   if(tm) p.t = +tm[1];
 
+  /* 生长槽专用：法兰外径 / 三角支撑数 */
+  if(p.type === 'vessel'){
+    var fdV = grabNum(s, ['法兰外径','法兰直径','法兰']);
+    if(fdV !== null) p.D = fdV;
+    var bm = s.match(/(\d+)\s*(?:个|件)?\s*(?:三角)?支撑/);
+    if(bm) p.layers = parseInt(bm[1], 10);
+  }
+
   /* 兜底 */
   if(p.W === null) p.W = d.defW;
   if(p.D === null) p.D = Math.round(p.W * 0.62 / 10) * 10;
@@ -333,7 +349,7 @@ function parseSentence(raw){
   p.W = clamp(round5(p.W), 120, 6000);
   p.D = clamp(round5(p.D), 80, 3000);
   p.H = clamp(round5(p.H), 100, 4000);
-  p.layers = clamp(Math.round(p.layers), 1, 8);
+  p.layers = clamp(Math.round(p.layers), 1, 24);
   p.t = clamp(round5(p.t), 5, 40);
 
   /* 类型相关微调 */
@@ -459,11 +475,180 @@ function buildTank(p){
   return out;
 }
 
-var BUILDERS = {rack:buildRack, cabinet:buildCabinet, table:buildTable, box:buildBox, lightbox:buildLightbox, tank:buildTank};
+
+/* ---------- 圆柱体系（生长槽）专用建模 ----------
+   任意四边形面片：法线由几何自算，再按 dir 朝外修正，
+   这样就不需要管顶点缠绕顺序，背面剔除依然正确。 */
+var EXTRA_FACES = [];
+
+function quadN(p0,p1,p2,p3,kind,dir,smooth,late){
+  var ux=p1[0]-p0[0], uy=p1[1]-p0[1], uz=p1[2]-p0[2];
+  var vx=p3[0]-p0[0], vy=p3[1]-p0[1], vz=p3[2]-p0[2];
+  var nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+  var L=Math.sqrt(nx*nx+ny*ny+nz*nz)||1; nx/=L; ny/=L; nz/=L;
+  if(dir && (nx*dir[0]+ny*dir[1]+nz*dir[2]) < 0){ nx=-nx; ny=-ny; nz=-nz; }
+  EXTRA_FACES.push({q:[p0,p1,p2,p3], n:[nx,ny,nz], k:kind, sm: smooth ? 1 : 0, lt: late ? 1 : 0});
+}
+
+var SEG = 72;
+function P3(r,a,y){ return [r*Math.cos(a), y, r*Math.sin(a)]; }
+
+/* 竖直圆柱面：out=true 外表，false 内表 */
+function ringSurf(r, y0, y1, kind, out, late){
+  for(var i=0;i<SEG;i++){
+    var a0=i*2*Math.PI/SEG, a1=(i+1)*2*Math.PI/SEG, am=(a0+a1)/2;
+    var d=[Math.cos(am),0,Math.sin(am)];
+    if(!out) d=[-d[0],0,-d[2]];
+    quadN(P3(r,a0,y0),P3(r,a1,y0),P3(r,a1,y1),P3(r,a0,y1),kind,d,true,late);
+  }
+}
+
+/* 圆盘（up=true 朝上） */
+function discSurf(r, y, kind, up){
+  var c=[0,y,0], d=[0, up?1:-1, 0];
+  for(var i=0;i<SEG;i++){
+    var a0=i*2*Math.PI/SEG, a1=(i+1)*2*Math.PI/SEG;
+    quadN(c, P3(r,a0,y), P3(r,a1,y), P3(r,a1,y), kind, d, true);
+  }
+}
+
+/* 圆环面（法兰顶/底） */
+function annulusSurf(r0, r1, y, kind, up, late){
+  var d=[0, up?1:-1, 0];
+  for(var i=0;i<SEG;i++){
+    var a0=i*2*Math.PI/SEG, a1=(i+1)*2*Math.PI/SEG;
+    quadN(P3(r0,a0,y), P3(r1,a0,y), P3(r1,a1,y), P3(r0,a1,y), kind, d, true, late);
+  }
+}
+
+/* 径向薄板（三角支撑）：在 (半径,高度) 平面给多边形，沿切向拉出厚度 */
+function radialPlate(angle, pts, halfT, kind){
+  var ca=Math.cos(angle), sa=Math.sin(angle);
+  var tx=-sa, tz=ca;                     /* 切向 */
+  function V(rt, yo, sgn){
+    var r=rt[0], y=rt[1];
+    return [r*ca + sgn*tx*halfT, y, r*sa + sgn*tz*halfT];
+  }
+  var A=[], B=[];
+  for(var i=0;i<pts.length;i++){ A.push(V(pts[i],0,-1)); B.push(V(pts[i],0,1)); }
+  for(var k=0;k<pts.length;k++){
+    var k2=(k+1)%pts.length;
+    quadN(A[k], A[k2], B[k2], B[k], kind, [tx,0,tz]);         /* 侧面 */
+  }
+  /* 两个端面（三角/多边形，用扇形近似） */
+  for(var t=1;t<pts.length-1;t++){
+    quadN(A[0], A[t], A[t+1], A[t+1], kind, [-ca,0,-sa]);
+    quadN(B[0], B[t], B[t+1], B[t+1], kind, [ ca,0, sa]);
+  }
+}
+
+/* 水平支管：从半径 r0 伸到 r1，沿某个角度方向 */
+function tube(angle, r0, r1, rad, y, kind, seg){
+  seg = seg || 20;
+  var ca=Math.cos(angle), sa=Math.sin(angle);
+  var tx=-sa, tz=ca;
+  for(var i=0;i<seg;i++){
+    var a0=i*2*Math.PI/seg, a1=(i+1)*2*Math.PI/seg, am=(a0+a1)/2;
+    var c0=Math.cos(a0), s0=Math.sin(a0), c1=Math.cos(a1), s1=Math.sin(a1);
+    function Q(rr, c, s){ return [rr*ca + c*tx*rad, y + s*rad, rr*sa + c*tz*rad]; }
+    var na=Math.cos(am), nb=Math.sin(am);
+    var d=[na*tx, nb, na*tz];                       /* 管壁外法线：切向 cos + 竖直 sin */
+    quadN(Q(r0,c0,s0), Q(r1,c0,s0), Q(r1,c1,s1), Q(r0,c1,s1), kind, d, true);
+  }
+  /* 管口端面环 */
+  var c=[r1*ca, y, r1*sa];
+  for(var j=0;j<seg;j++){
+    var b0=j*2*Math.PI/seg, b1=(j+1)*2*Math.PI/seg;
+    var p0=[r1*ca + Math.cos(b0)*tx*rad, y+Math.sin(b0)*rad, r1*sa + Math.cos(b0)*tz*rad];
+    var p1=[r1*ca + Math.cos(b1)*tx*rad, y+Math.sin(b1)*rad, r1*sa + Math.cos(b1)*tz*rad];
+    quadN(c, p0, p1, p1, kind, [ca,0,sa]);
+  }
+}
+
+function buildVessel(p){
+  EXTRA_FACES = [];
+  var OD = p.W;                       /* 筒体外径 */
+  var FD = Math.max(p.D, OD + 60);    /* 法兰外径 */
+  var H  = p.H;                       /* 总高 */
+  var t  = Math.max(p.t, 8);          /* 壁厚 */
+  var nG = p.layers;                  /* 三角支撑数 */
+  var out = [];
+
+  var ID  = Math.max(OD - 2*t, OD*0.6);          /* 内径 */
+  var BC  = (FD + ID) / 2;                       /* 螺栓圆 */
+  var nB  = 24;                                  /* 螺栓孔数 */
+  var hB  = 14;                                  /* 孔径 */
+
+  var skirtH = Math.round(H * 0.184 / 5) * 5;    /* 裙座高（图纸 340/1850） */
+  var coneH  = Math.round(H * 0.151 / 5) * 5;    /* 锥段高（280/1850） */
+  var skirtOD = Math.round(OD * 0.57 / 5) * 5;   /* 裙座外径 */
+  var bodyY0 = skirtH + coneH;                   /* 直筒起始高度 */
+  var fTh = Math.max(20, Math.round(H * 0.0135 / 5) * 5);  /* 法兰厚 25 */
+
+  var ro = OD/2, ri = ID/2, rf = FD/2, rs = skirtOD/2;
+
+  /* --- 上部直筒 --- */
+  ringSurf(ro, bodyY0, H - fTh, 'panel', true);
+  ringSurf(ri, bodyY0, H - fTh, 'glass', false);
+
+  /* --- 下部锥段（外/内） --- */
+  var coneSeg = 1;   /* 用环形放样实现：分成 SEG 段，每段上下半径不同 */
+  for(var i=0;i<SEG;i++){
+    var a0=i*2*Math.PI/SEG, a1=(i+1)*2*Math.PI/SEG, am=(a0+a1)/2;
+    quadN(P3(ro,a0,bodyY0), P3(ro,a1,bodyY0), P3(rs,a1,skirtH), P3(rs,a0,skirtH), 'panel', [Math.cos(am),0,Math.sin(am)], true);
+    quadN(P3(ri,a0,bodyY0), P3(ri,a1,bodyY0), P3(rs-t,a1,skirtH), P3(rs-t,a0,skirtH), 'glass', [-Math.cos(am),0,-Math.sin(am)], true);
+  }
+
+  /* --- 裙座 --- */
+  ringSurf(rs, 0, skirtH, 'frame', true);
+  ringSurf(rs - t, 0, skirtH, 'glass', false);
+
+  /* --- 底板（圆盘，不是方块） --- */
+  discSurf(rs - t, t, 'panel', true);
+  discSurf(rs - t, t, 'panel', false);
+
+  /* --- 顶部法兰（环） --- */
+  annulusSurf(ri, rf, H, 'frame', true, true);          /* 顶面 */
+  annulusSurf(ri, rf, H - fTh, 'frame', false, true);   /* 底面 */
+  ringSurf(rf, H - fTh, H, 'frame', true, true);        /* 外缘 */
+  ringSurf(ri, H - fTh, H, 'frame', false, true);       /* 内缘 */
+
+  /* --- 24 个螺栓孔（画成深色小圆筒，视觉上就是孔） --- */
+  for(var b=0;b<nB;b++){
+    var ang = b*2*Math.PI/nB + Math.PI/nB;
+    var hx = BC/2*Math.cos(ang), hz = BC/2*Math.sin(ang);
+    for(var k=0;k<9;k++){
+      var q0=k*2*Math.PI/9, q1=(k+1)*2*Math.PI/9;
+      var r0h=hB/2;
+      quadN([hx, H+1.0, hz],
+            [hx+r0h*Math.cos(q0), H+1.0, hz+r0h*Math.sin(q0)],
+            [hx+r0h*Math.cos(q1), H+1.0, hz+r0h*Math.sin(q1)],
+            [hx+r0h*Math.cos(q1), H+1.0, hz+r0h*Math.sin(q1)], 'hole', [0,1,0], true);
+    }
+  }
+
+  /* --- 12 个三角支撑（法兰下的加强筋） --- */
+  var gh = Math.round(Math.min(150, H*0.081) / 5) * 5;    /* 高 150 */
+  for(var g=0; g<nG; g++){
+    var ga = g*2*Math.PI/nG;
+    radialPlate(ga, [[ro + 3, H - fTh], [rf - 8, H - fTh], [ro + 3, H - fTh - gh]], t*0.9, 'frame');
+  }
+
+  /* --- 斜支管 + 回流管（图纸：Φ50） --- */
+  var pr = Math.max(24, Math.round(OD*0.028));
+  tube(-Math.PI*0.42, ro - 60, rf + 70, pr, H*0.60, 'pipe', 18);
+  tube(Math.PI*0.55, rs - 30, rs + 160, pr*0.95, skirtH*0.90, 'pipe', 18);
+
+  return out;
+}
+
+var BUILDERS = {rack:buildRack, cabinet:buildCabinet, table:buildTable, box:buildBox, lightbox:buildLightbox, tank:buildTank, vessel:buildVessel};
 
 function buildModel(p){
   var fn = BUILDERS[p.type] || buildRack;
-  return fn(p);
+  var r = fn(p);
+  if(!r){ EXTRA_FACES = []; return []; }
+  return r;
 }
 
 /* =========================================================
@@ -570,7 +755,7 @@ function render3D(){
   var Ln = Math.sqrt(L[0]*L[0]+L[1]*L[1]+L[2]*L[2]);
   L = [L[0]/Ln, L[1]/Ln, L[2]/Ln];
 
-  var fs = faceList(model);
+  var fs = faceList(model).concat(EXTRA_FACES || []);
   var list = [];
   for(var f=0; f<fs.length; f++){
     var fc = fs[f];
@@ -589,17 +774,18 @@ function render3D(){
     var rz = ny*sinP + rz0*cosP;
     if(rz <= 0.002) continue;                       /* 背面剔除 */
     var d = Math.max(0, rx*L[0] + ry*L[1] + rz*L[2]);
-    var shade = 0.72 + 0.28 * d;
-    list.push({P:P, z: zsum/4, k: fc.k, shade: shade, nz: rz});
+    var shade = 0.62 + 0.40 * d;
+    list.push({P:P, z: zsum/4, k: fc.k, shade: shade, nz: rz, sm: fc.sm, dh: d, lt: fc.lt});
   }
-  list.sort(function(a,b){ return b.z - a.z; });
+  list.sort(function(a,b){ return (b.z - (b.lt?1e9:0)) - (a.z - (a.lt?1e9:0)); });
 
   for(var m=0; m<list.length; m++){
     var it = list[m];
     var mat = MAT[it.k] || MAT.panel;
-    var r = Math.round(mat.c[0]*it.shade);
-    var g = Math.round(mat.c[1]*it.shade);
-    var b = Math.round(mat.c[2]*it.shade);
+    var hi = Math.pow(it.dh || 0, 10) * 70;
+    var r = Math.min(255, Math.round(mat.c[0]*it.shade + hi));
+    var g = Math.min(255, Math.round(mat.c[1]*it.shade + hi));
+    var b = Math.min(255, Math.round(mat.c[2]*it.shade + hi));
     ctx.beginPath();
     ctx.moveTo(it.P[0].X, it.P[0].Y);
     ctx.lineTo(it.P[1].X, it.P[1].Y);
@@ -610,9 +796,11 @@ function render3D(){
     ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
     ctx.fill();
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = 'rgba(26,74,96,0.42)';
-    ctx.lineWidth = 0.9;
-    ctx.stroke();
+    if(!it.sm){
+      ctx.strokeStyle = 'rgba(26,74,96,0.42)';
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+    }
   }
 }
 
@@ -833,6 +1021,7 @@ function sheetBBox(items){
   items.forEach(function(it){
     if(it.t === 'line'){ add(it.x1, it.y1); add(it.x2, it.y2); }
     else if(it.t === 'rect'){ add(it.x0, it.y0); add(it.x1, it.y1); }
+    else if(it.t === 'circle'){ add(it.x - it.r, it.y - it.r); add(it.x + it.r, it.y + it.r); }
     else if(it.t === 'tri'){ it.pts.forEach(function(p){ add(p[0], p[1]); }); }
     else if(it.t === 'text'){
       var w = it.s.length * it.h * 0.66;
@@ -881,6 +1070,13 @@ function renderSheet(sh){
         'stroke-dasharray': it.dash ? '4 3' : 'none',
         'vector-effect': 'non-scaling-stroke'
       }));
+    } else if(it.t === 'circle'){
+      g.appendChild(el('circle', {
+        cx: it.x, cy: -it.y, r: it.r,
+        fill: 'none', stroke: strokeOf(it.layer), 'stroke-width': sw(it.w || 1),
+        'stroke-dasharray': it.dash ? '4 3' : 'none',
+        'vector-effect': 'non-scaling-stroke'
+      }));
     } else if(it.t === 'tri'){
       g.appendChild(el('polygon', {
         points: it.pts.map(function(p){ return p[0] + ',' + (-p[1]); }).join(' '),
@@ -907,8 +1103,186 @@ function strokeOf(layer){
   return '#1f2937';
 }
 
+
+/* ---------- 生长槽（圆柱罐体）三视图 ---------- */
+function buildSheetCyl(){
+  var OD = params.W, FD = params.D, H = params.H, t = params.t, nG = params.layers;
+  var ID = Math.max(OD - 2*t, OD*0.6);
+  var BC = (FD + ID)/2;
+  var nB = 24, dB = 14;
+
+  var skirtH = Math.round(H * 0.184 / 5) * 5;
+  var coneH  = Math.round(H * 0.151 / 5) * 5;
+  var skirtOD = Math.round(OD * 0.57 / 5) * 5;
+  var bodyY0 = skirtH + coneH;
+  var fTh = Math.max(20, Math.round(H * 0.0135 / 5) * 5);
+
+  var U = Math.max(FD, H, OD) * 1.02;
+  var FS  = U * 0.024;
+  var FS2 = FS * 0.82;
+  var THICK = U / 950, THIN = U / 2400;
+  var items = [];
+
+  function addLine(x1,y1,x2,y2,layer,w){
+    items.push({t:'line', x1:x1,y1:y1,x2:x2,y2:y2, layer:layer||'THIN', w:w||THIN});
+  }
+  function addCircle(x,y,r,layer,w,dash){
+    items.push({t:'circle', x:x, y:y, r:r, layer:layer||'OUTLINE', w:w||THIN, dash:!!dash});
+  }
+  function addText(x,y,h,zh,en,layer,align,rot){
+    items.push({t:'text', x:x, y:y, h:h, s:zh, sa:(en==null?zh:en),
+      layer:layer||'TEXT', align:align||'center', rot:rot||0});
+  }
+  function addTri(pts,layer){ items.push({t:'tri', pts:pts, layer:layer||'DIM'}); }
+  function arrow(x,y,dir,vertical){
+    var ah = FS*0.5, aw = FS*0.16;
+    if(!vertical) addTri([[x,y],[x+dir*ah,y+aw],[x+dir*ah,y-aw]], 'DIM');
+    else          addTri([[x,y],[x+aw,y+dir*ah],[x-aw,y+dir*ah]], 'DIM');
+  }
+  function dimH(x1,x2,y,label,fromY){
+    if(fromY != null){ addLine(x1,fromY,x1,y,'DIM',THIN*0.7); addLine(x2,fromY,x2,y,'DIM',THIN*0.7); }
+    addLine(x1,y,x2,y,'DIM',THIN*0.9);
+    arrow(x1,y,1); arrow(x2,y,-1);
+    addText((x1+x2)/2, y + FS*0.85, FS2, label, label, 'DIM', 'center');
+  }
+  function dimV(y1,y2,x,label,fromX){
+    if(fromX != null){ addLine(fromX,y1,x,y1,'DIM',THIN*0.7); addLine(fromX,y2,x,y2,'DIM',THIN*0.7); }
+    addLine(x,y1,x,y2,'DIM',THIN*0.9);
+    arrow(x,y1,1,true); arrow(x,y2,-1,true);
+    addText(x - FS*0.9, (y1+y2)/2, FS2, label, label, 'DIM', 'center', 90);
+  }
+
+  var ro = OD/2, ri = ID/2, rf = FD/2, rs = skirtOD/2;
+  var xc = rf, oy = 0;                         /* 主视图：x 0..FD，y 0..H */
+  var gap = FS*7.2;
+
+  /* ============ 正视图 ============ */
+  /* 法兰 */
+  addLine(xc-rf, H,     xc+rf, H,     'OUTLINE', THICK);
+  addLine(xc-rf, H-fTh, xc+rf, H-fTh, 'OUTLINE', THICK);
+  addLine(xc-rf, H-fTh, xc-rf, H,     'OUTLINE', THICK);
+  addLine(xc+rf, H-fTh, xc+rf, H,     'OUTLINE', THICK);
+  /* 直筒 */
+  addLine(xc-ro, bodyY0, xc-ro, H-fTh, 'OUTLINE', THICK);
+  addLine(xc+ro, bodyY0, xc+ro, H-fTh, 'OUTLINE', THICK);
+  /* 内壁（虚线） */
+  addLine(xc-ri, bodyY0, xc-ri, H-fTh, 'HIDDEN', THIN);
+  addLine(xc+ri, bodyY0, xc+ri, H-fTh, 'HIDDEN', THIN);
+  /* 锥段 */
+  addLine(xc-ro, bodyY0, xc-rs, skirtH, 'OUTLINE', THICK);
+  addLine(xc+ro, bodyY0, xc+rs, skirtH, 'OUTLINE', THICK);
+  /* 裙座 */
+  addLine(xc-rs, 0, xc-rs, skirtH, 'OUTLINE', THICK);
+  addLine(xc+rs, 0, xc+rs, skirtH, 'OUTLINE', THICK);
+  addLine(xc-rs, 0, xc+rs, 0, 'OUTLINE', THICK);
+  /* 底板 */
+  addLine(xc-rs+t, t, xc+rs-t, t, 'HIDDEN', THIN);
+  /* 中心线 */
+  addLine(xc, -FS*2.2, xc, H + FS*1.6, 'HIDDEN', THIN*0.7);
+  /* 三角支撑（正面看到 3 个） */
+  var gh = Math.round(Math.min(150, H*0.081)/5)*5;
+  [-1, 0, 1].forEach(function(k){
+    var bx = xc + k*ro*0.62;
+    addLine(bx, H-fTh, bx, H-fTh-gh, 'THIN', THIN);
+    addLine(bx, H-fTh, bx + ro*0.30, H-fTh, 'THIN', THIN);
+    addLine(bx + ro*0.30, H-fTh, bx, H-fTh-gh, 'THIN', THIN);
+  });
+  /* 两支管 */
+  function stub(ax, ay, len, rad){
+    addLine(ax, ay-rad, ax+len, ay-rad, 'OUTLINE', THICK);
+    addLine(ax, ay+rad, ax+len, ay+rad, 'OUTLINE', THICK);
+    addLine(ax+len, ay-rad, ax+len, ay+rad, 'OUTLINE', THICK);
+  }
+  stub(xc+ro, H*0.63, ro*0.16, Math.max(20, OD*0.023));
+  stub(xc+rs, skirtH*0.95, rs*0.22, Math.max(20, OD*0.023));
+
+  /* 主视图标注 */
+  dimH(xc-rf, xc+rf, H + FS*2.4, String(FD), null);
+  dimH(xc-ro, xc+ro, H + FS*5.0, String(OD), H - fTh);
+  dimV(oy, oy+H, xc - rf - FS*2.6, String(H), null);
+  var xr = xc + rf + FS*2.6;
+  dimV(bodyY0, H, xr, String(H - bodyY0), xc + ro);
+  dimV(skirtH, bodyY0, xr, String(coneH), xc + ro);
+  dimV(0, skirtH, xr, String(skirtH), xc + rs);
+  addText(xc, -(FS*4.0), FS, '正 视 图', 'FRONT VIEW', 'TEXT', 'center');
+
+  /* ============ 俯视图（去盖） ============ */
+  var planY0 = -(gap + FD/2 + FS*2);
+  var pcx = xc, pcy = planY0;
+  addCircle(pcx, pcy, rf, 'OUTLINE', THICK);
+  addCircle(pcx, pcy, ro, 'OUTLINE', THIN);
+  addCircle(pcx, pcy, ri, 'HIDDEN', THIN, true);
+  addCircle(pcx, pcy, BC/2, 'HIDDEN', THIN, true);
+  for(var b=0;b<nB;b++){
+    var a = b*2*Math.PI/nB + Math.PI/nB;
+    addCircle(pcx + BC/2*Math.cos(a), pcy + BC/2*Math.sin(a), dB/2, 'OUTLINE', THIN);
+  }
+  addLine(pcx-rf-FS*1.2, pcy, pcx+rf+FS*1.2, pcy, 'HIDDEN', THIN*0.7);
+  addLine(pcx, pcy-rf-FS*1.2, pcx, pcy+rf+FS*1.2, 'HIDDEN', THIN*0.7);
+  dimH(pcx-rf, pcx+rf, pcy - rf - FS*2.2, String(FD), null);
+  dimV(pcy-rf, pcy+rf, pcx + rf + FS*2.4, String(FD), null);
+  /* 螺栓圆 / 内径 引出标注 */
+  addLine(pcx, pcy, pcx + BC/2*Math.cos(-0.6), pcy + BC/2*Math.sin(-0.6), 'DIM', THIN*0.6);
+  addText(pcx + BC/2*0.55, pcy - BC/2*0.34, FS2, '均布 ' + String(BC), 'BC ' + BC, 'DIM', 'center');
+  addText(pcx, pcy + ri*0.45, FS2, '内径 ' + ID, 'ID ' + ID, 'DIM', 'center');
+  addText(pcx + rf*0.62, pcy + rf*0.62, FS2, nB + '-Φ' + dB, nB + '-DIA' + dB, 'DIM', 'center');
+  addText(pcx, pcy - rf - FS*5.0, FS, '俯 视 图（去盖）', 'TOP VIEW (NO LID)', 'TEXT', 'center');
+
+  /* ============ 盖板俯视图 ============ */
+  var lcx = FD + gap + rf, lcy = oy + H*0.52;
+  addCircle(lcx, lcy, rf, 'OUTLINE', THICK);
+  addCircle(lcx, lcy, bc2(), 'HIDDEN', THIN, true);
+  addCircle(lcx, lcy, 75, 'OUTLINE', THIN);
+  addCircle(lcx, lcy, 25, 'OUTLINE', THICK);
+  for(var b2=0;b2<nB;b2++){
+    var a2 = b2*2*Math.PI/nB + Math.PI/nB;
+    addCircle(lcx + bc2()*Math.cos(a2), lcy + bc2()*Math.sin(a2), dB/2, 'OUTLINE', THIN);
+  }
+  function bc2(){ return BC/2; }
+  addLine(lcx-rf-FS*1.2, lcy, lcx+rf+FS*1.2, lcy, 'HIDDEN', THIN*0.7);
+  addLine(lcx, lcy-rf-FS*1.2, lcx, lcy+rf+FS*1.2, 'HIDDEN', THIN*0.7);
+  dimH(lcx-rf, lcx+rf, lcy - rf - FS*2.2, String(FD), null);
+  addText(lcx + rf*0.6, lcy + rf*0.62, FS2, nB + '-Φ' + dB, nB + '-DIA' + dB, 'DIM', 'center');
+  addText(lcx, lcy + 105, FS2, '板厚 ' + fTh, 'T=' + fTh, 'DIM', 'center');
+  addText(lcx, lcy - rf - FS*5.0, FS, '盖 板 俯 视 图', 'LID TOP VIEW', 'TEXT', 'center');
+
+  /* ============ 标题栏 ============ */
+  var d = TYPES[params.type];
+  var bb0 = sheetBBox(items);
+  var tbW = U * 0.42, tbH = U * 0.125;
+  var tbX = bb0.x1 - tbW, tbY = bb0.y0 - tbH - FS*1.6;
+  items.push({t:'rect', x0:tbX, y0:tbY, x1:tbX+tbW, y1:tbY+tbH, layer:'FRAME', w:THICK*0.8});
+  [0.25,0.5,0.75].forEach(function(f){
+    addLine(tbX, tbY + tbH*f, tbX + tbW, tbY + tbH*f, 'FRAME', THIN*0.8);
+  });
+  addLine(tbX + tbW*0.58, tbY + tbH*0.25, tbX + tbW*0.58, tbY + tbH, 'FRAME', THIN*0.8);
+  var today = new Date();
+  var dateStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  var rowH = tbH*0.25, TS = tbH*0.165;
+  var tx = tbX + tbW*0.035;
+  addText(tx, tbY+rowH*3.5, TS, '瑞利高展示科技', 'RUILIGAO DISPLAY TECH', 'TEXT', 'left');
+  addText(tx, tbY+rowH*2.5, TS, '图名 ' + d.label, 'NAME ' + d.en, 'TEXT', 'left');
+  addText(tx, tbY+rowH*1.5, TS, '比例 1:1', 'SCALE 1:1', 'TEXT', 'left');
+  addText(tx, tbY+rowH*0.5, TS, dateStr, dateStr, 'TEXT', 'left');
+  var tx2 = tbX + tbW*0.62;
+  addText(tx2, tbY+rowH*2.5, TS, '单位 mm', 'UNIT mm', 'TEXT', 'left');
+  addText(tx2, tbY+rowH*1.5, TS, '壁厚 t' + t, 'T=' + t, 'TEXT', 'left');
+  addText(tx2, tbY+rowH*0.5, TS, d.code, d.code, 'TEXT', 'left');
+
+  /* 图框 */
+  var bb = sheetBBox(items);
+  var pad = FS * 2.2;
+  items.push({t:'rect', x0:bb.x0-pad, y0:bb.y0-pad, x1:bb.x1+pad, y1:bb.y1+pad, layer:'FRAME', w:THICK});
+  items.push({t:'rect', x0:bb.x0-pad*0.72, y0:bb.y0-pad*0.72, x1:bb.x1+pad*0.72, y1:bb.y1+pad*0.72, layer:'FRAME', w:THIN});
+
+  return {
+    items: items, bbox: sheetBBox(items), pad: pad*0.35, U: U,
+    meta: {W:OD, D:FD, H:H, t:t, code:d.code, zh:d.label, en:d.en, date:dateStr}
+  };
+}
+
 function buildCAD(){
-  SHEET = buildSheet();
+  SHEET = (params.type === 'vessel') ? buildSheetCyl() : buildSheet();
   renderSheet(SHEET);
 }
 
@@ -975,6 +1349,10 @@ function sheetToDXF(sh){
         p(10,dxfNum(q[0])); p(20,dxfNum(q[1])); p(30,'0.0');
         p(11,dxfNum(q[2])); p(21,dxfNum(q[3])); p(31,'0.0');
       });
+    } else if(it.t === 'circle'){
+      p(0,'CIRCLE'); p(8,it.dash ? 'HIDDEN' : it.layer);
+      p(10,dxfNum(it.x)); p(20,dxfNum(it.y)); p(30,'0.0');
+      p(40,dxfNum(it.r));
     } else if(it.t === 'tri'){
       p(0,'POLYLINE'); p(8,it.layer); p(66,1); p(70,1);
       it.pts.forEach(function(pt){
@@ -1015,6 +1393,27 @@ function fillTypeSelect(){
   });
 }
 
+/* 不同结构，参数含义不同 —— 标签跟着换 */
+var LABELS = {
+  rack:    ['宽 W','深 D','高 H','层数','板厚 t'],
+  cabinet: ['宽 W','深 D','高 H','层数','板厚 t'],
+  table:   ['宽 W','深 D','高 H','层数','板厚 t'],
+  box:     ['宽 W','深 D','高 H','层数','板厚 t'],
+  lightbox:['宽 W','厚 D','高 H','层数','板厚 t'],
+  tank:    ['长 L','宽 W','高 H','层数','板厚 t'],
+  vessel:  ['筒体外径 Φ','法兰外径 Φ','总高 H','三角支撑数','壁厚 t']
+};
+
+function syncLabels(){
+  var L = LABELS[params.type] || LABELS.rack;
+  [['pW',L[0]],['pD',L[1]],['pH',L[2]],['pLayers',L[3]],['pT',L[4]]].forEach(function(a){
+    var lab = $(a[0]).parentNode.querySelector('label');
+    if(lab) lab.textContent = a[1];
+  });
+  $('pLayers').max = (params.type === 'vessel') ? 24 : 8;
+  $('pD').min = (params.type === 'vessel') ? 200 : 100;
+}
+
 function syncInputs(){
   $('pType').value = params.type;
   $('pW').value = params.W;
@@ -1022,11 +1421,24 @@ function syncInputs(){
   $('pH').value = params.H;
   $('pLayers').value = params.layers;
   $('pT').value = params.t;
+  syncLabels();
 }
 
 function updateMeta(){
   var d = TYPES[params.type];
   $('typeTag').textContent = d.label;
+  if(params.type === 'vessel'){
+    var OD = params.W, t2 = params.t, ID = Math.max(OD - 2*t2, OD*0.6);
+    $('meta').innerHTML =
+      '<div class="row"><span>结构</span><span>圆柱罐体（生长槽）</span></div>' +
+      '<div class="row"><span>筒体</span><span>Φ' + OD + ' / 内 Φ' + ID + '</span></div>' +
+      '<div class="row"><span>总高</span><span>' + params.H + ' mm</span></div>' +
+      '<div class="row"><span>顶部法兰</span><span>Φ' + params.D + ' · 螺栓圆 Φ' + Math.round((params.D+ID)/2) + '</span></div>' +
+      '<div class="row"><span>加固</span><span>' + params.layers + ' 个三角支撑 / 壁厚 ' + t2 + '</span></div>' +
+      '<div class="row"><span>图号</span><span>' + d.code + '</span></div>' +
+      '<div style="margin-top:6px;color:#64748b">单位 mm；含 24×Φ14 法兰孔、斜支管与回流管；盖板另出图。</div>';
+    return;
+  }
   $('meta').innerHTML =
     '<div class="row"><span>识别结果</span><span>' + d.label + '</span></div>' +
     '<div class="row"><span>外形尺寸</span><span>' + params.W + ' × ' + params.D + ' × ' + params.H + '</span></div>' +
@@ -1036,6 +1448,8 @@ function updateMeta(){
 }
 
 function generate(){
+  syncLabels();
+  if(params.type === 'vessel' || params.type === 'tank'){ if(view.pitch < 0.45) view.pitch = 0.56; }
   model = buildModel(params);
   render3D();
   buildCAD();
@@ -1202,7 +1616,7 @@ function readInputs(ev){
   params.type = $('pType').value;
   params.D = clamp(round5(+$('pD').value || 300), 80, 3000);
   params.H = clamp(round5(+$('pH').value || 600), 100, 4000);
-  params.layers = clamp(Math.round(+$('pLayers').value || 1), 1, 8);
+  params.layers = clamp(Math.round(+$('pLayers').value || 1), 1, 24);
   params.t = clamp(round5(+$('pT').value || 15), 5, 40);
   if(fromId === 'pH' && imgRatio){
     /* 图给比例、你给高度 —— 宽度自动跟着走 */
@@ -1220,7 +1634,8 @@ var EXAMPLES = [
   '亚克力展柜 900×500×1800，两层，板厚20',
   '亚克力展示台，宽1200，深600，高900，板厚25',
   '亚克力陈列盒 400×300×250，分四格',
-  '亚克力灯箱，宽800，高600，深120，板厚15'
+  '亚克力灯箱，宽800，高600，深120，板厚15',
+  '生长槽 外径1090 法兰1250 高1850 壁厚20 12个支撑'
 ];
 
 function fillChips(){
@@ -1347,8 +1762,12 @@ function init(){
     $(id).addEventListener('change', readInputs);
   });
 
+  var bv = $('btnViewer');
+  if(bv) bv.addEventListener('click', function(){ window.open('viewer.html', '_blank'); });
   $('btnReset').addEventListener('click', function(){
-    view.yaw = -0.62; view.pitch = 0.30; view.zoom = 1;
+    view.yaw = -0.62;
+    view.pitch = (params.type === 'vessel' || params.type === 'tank') ? 0.56 : 0.30;
+    view.zoom = 1;
     render3D();
   });
   $('btnSpin').addEventListener('click', function(){
