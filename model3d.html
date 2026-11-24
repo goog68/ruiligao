@@ -47,7 +47,51 @@
   #title3d{position:absolute;left:14px;top:14px;font-size:12px;color:#6a7b83;pointer-events:none}
   #title3d b{color:#1f2d34;font-size:14px}
   #dropzone{display:none}
-  /* 文件拖入遮罩 */
+  /* 六面视图覆盖层 */
+  #sixPanel{position:absolute;inset:0;background:#f5f7f8;display:none;z-index:60;flex-direction:column}
+  #sixPanel.show{display:flex}
+  #sixHead{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
+    background:#fff;border-bottom:1px solid #dbe3e6}
+  #sixHead .t{font-size:14px;font-weight:700;color:#1f2d34}
+  #sixHead .t small{font-weight:400;color:#8a9aa2;font-size:12px;margin-left:8px}
+  #sixHead button{padding:6px 14px;border:1px solid #d0dbe0;background:#fff;color:#2b3a42;
+    border-radius:6px;cursor:pointer;font-size:12px}
+  #sixHead button:hover{border-color:#39c5bb;color:#0d6b66}
+  #sixGrid{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr;
+    gap:10px;padding:12px;min-height:0}
+  .cell{position:relative;background:#fff;border:1px solid #dbe3e6;border-radius:8px;overflow:hidden}
+  .cell canvas{width:100%;height:100%;display:block}
+  .cell .lab{position:absolute;left:8px;top:6px;font-size:12px;font-weight:700;color:#1f2d34;
+    background:rgba(255,255,255,.85);padding:1px 8px;border-radius:4px;border:1px solid #e3ebee}
+  .cell .lab em{font-style:normal;color:#8a9aa2;font-weight:400;font-size:10px;margin-left:4px}
+  .cell svg.dimOverlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .cell svg.dimOverlay line{stroke:#e0443f;stroke-width:1}
+  .cell svg.dimOverlay text{fill:#c0302c;font-size:10px;font-family:"Microsoft YaHei",sans-serif}
+  /* 改尺寸面板 */
+  #paramPanel{position:absolute;right:14px;top:14px;background:rgba(255,255,255,.95);
+    border:1px solid #dbe3e6;border-radius:8px;padding:12px 14px;z-index:70;min-width:200px;
+    box-shadow:0 2px 10px rgba(0,0,0,.08)}
+  #paramPanel .pt{font-size:12px;font-weight:700;color:#1f2d34;margin-bottom:10px}
+  #paramPanel .pr{margin-bottom:8px}
+  #paramPanel .pr label{display:block;font-size:11px;color:#6a7b83;margin-bottom:3px}
+  #paramPanel .pr input{width:100%;padding:5px 8px;border:1px solid #d0dbe0;border-radius:5px;
+    font-size:12px;color:#1f2d34}
+  #paramPanel .pr input:focus{outline:none;border-color:#39c5bb}
+  #paramPanel .hint{font-size:10px;color:#9aa8af;line-height:1.5;margin-top:6px}
+  /* 打印样式：只保留六视图，A4 横向 */
+  @media print{
+    body{background:#fff}
+    #side{display:none}
+    #view{background:#fff}
+    #title3d,#hint,#toolbar{display:none}
+    #sixPanel{position:fixed;inset:0;display:flex!important;background:#fff;z-index:9999}
+    #sixHead{background:#fff;border:none}
+    #sixHead button{display:none}
+    #paramPanel{display:none!important}
+    #sixGrid{grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;padding:8px}
+    .cell{border:1px solid #999}
+    @page{size:A4 landscape;margin:8mm}
+  }
   #overlay{position:absolute;inset:0;background:rgba(10,16,20,.82);display:none;
     align-items:center;justify-content:center;z-index:50;flex-direction:column;gap:10px}
   #overlay.show{display:flex}
@@ -73,6 +117,7 @@
         <div class="t">视角</div>
         <button class="btn" data-view="reset">↺ 复位视角</button>
         <button class="btn" id="btnAuto" data-view="auto">▶ 自动旋转</button>
+        <button class="btn" id="btnSix" style="font-weight:700">📐 六面视图（上/下/前/后/左/右）</button>
         <button class="btn" data-view="front">正视（前）</button>
         <button class="btn" data-view="top">俯视（上）</button>
         <button class="btn" data-view="side">侧视（左）</button>
@@ -120,6 +165,35 @@
     <div id="overlay">
       <div class="big">将 DXF 文件拖入窗口</div>
       <div class="sm">自动识别旋转轴与轮廓，重建 3D 模型</div>
+    </div>
+    <!-- 六面视图 -->
+    <div id="sixPanel">
+      <div id="sixHead">
+        <div class="t">六面视图 <small>上 · 下 · 前 · 后 · 左 · 右　（正交投影，按工程图排布）</small></div>
+        <div style="display:flex;gap:8px">
+          <button id="btnMeasure" style="font-weight:700">📏 量尺寸</button>
+          <button id="btnEditDim">✏️ 改尺寸</button>
+          <button id="btnPrint">🖨 打印 / 导出</button>
+          <button id="sixClose">✕ 返回自由旋转</button>
+        </div>
+      </div>
+      <div id="paramPanel" style="display:none">
+        <div class="pt">修改尺寸（mm）</div>
+        <div class="pr"><label>总高 H</label><input type="number" id="pHeight"></div>
+        <div class="pr"><label>法兰直径 Φ</label><input type="number" id="pFlange"></div>
+        <div class="pr"><label>筒体直径 Φ</label><input type="number" id="pBody"></div>
+        <div class="pr"><label>裙座直径 Φ</label><input type="number" id="pSkirt"></div>
+        <button class="tbtn" id="btnApplyDim" style="width:100%;margin-top:4px">应用（实时重建）</button>
+        <div class="hint">改完点「应用」，模型和六视图实时更新</div>
+      </div>
+      <div id="sixGrid">
+        <div class="cell" data-face="top"><canvas></canvas><svg class="dimOverlay"></svg><div class="lab">俯视图 <em>TOP</em></div></div>
+        <div class="cell" data-face="front"><canvas></canvas><svg class="dimOverlay"></svg><div class="lab">主视图 <em>FRONT</em></div></div>
+        <div class="cell" data-face="right"><canvas></canvas><svg class="dimOverlay"></svg><div class="lab">右视图 <em>RIGHT</em></div></div>
+        <div class="cell" data-face="back"><canvas></canvas><svg class="dimOverlay"></svg><div class="lab">后视图 <em>BACK</em></div></div>
+        <div class="cell" data-face="bottom"><canvas></canvas><svg class="dimOverlay"></svg><div class="lab">仰视图 <em>BOTTOM</em></div></div>
+        <div class="cell" data-face="left"><canvas></canvas><svg class="dimOverlay"></svg><div class="lab">左视图 <em>LEFT</em></div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -339,8 +413,10 @@ var modelGroup = new THREE.Group();
 scene.add(modelGroup);
 
 var mesh, wireMesh, axesHelper, hiddenMesh;
+var currentProfile = DEFAULT_PROFILE;   // 当前轮廓（可被「改尺寸」修改）
 
 function buildModel(profile){
+  currentProfile = profile;
   // 清除旧模型
   while(modelGroup.children.length) modelGroup.remove(modelGroup.children[0]);
 
@@ -542,6 +618,281 @@ function animate(){
   renderer.render(scene, camera);
 }
 animate();
+
+/* ---------- 六面视图 ---------- */
+var sixRenderers = [];   // {renderer, camera, canvas, face}
+var sixScene = scene;    // 复用主场景
+
+var FACE_DEFS = {
+  front:  {pos:[0,0,1],    up:[0,1,0],  lab:'主视图'},
+  back:   {pos:[0,0,-1],   up:[0,1,0],  lab:'后视图'},
+  left:   {pos:[-1,0,0],   up:[0,1,0],  lab:'左视图'},
+  right:  {pos:[1,0,0],    up:[0,1,0],  lab:'右视图'},
+  top:    {pos:[0,1,0],    up:[0,0,-1], lab:'俯视图'},
+  bottom: {pos:[0,-1,0],   up:[0,0,1],  lab:'仰视图'}
+};
+
+function setupSixView(){
+  if(sixRenderers.length) return;
+  var cells = document.querySelectorAll('#sixGrid .cell');
+  var dist = 4000;
+  cells.forEach(function(cell){
+    var face = cell.getAttribute('data-face');
+    var cv = cell.querySelector('canvas');
+    var r = new THREE.WebGLRenderer({canvas:cv, antialias:true, alpha:false});
+    r.setClearColor(0xffffff, 1);
+    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    var cam = new THREE.OrthographicCamera(-2500, 2500, 2500, -2500, 1, 20000);
+    var d = FACE_DEFS[face];
+    cam.position.set(d.pos[0]*dist, d.pos[1]*dist, d.pos[2]*dist);
+    cam.up.set(d.up[0], d.up[1], d.up[2]);
+    cam.lookAt(0, -200, 0);
+    cam.zoom = 0.55;
+    cam.updateProjectionMatrix();
+    sixRenderers.push({renderer:r, camera:cam, canvas:cv, face:face, cell:cell});
+  });
+}
+
+function renderSixView(){
+  // 六视图统一用工程图样式：白底 + 素模 + 轮廓线
+  var prev = mesh.material;
+  var needRestore = false;
+  sixRenderers.forEach(function(sr){
+    var w = sr.cell.clientWidth, h = sr.cell.clientHeight;
+    if(w === 0 || h === 0) return;
+    sr.renderer.setSize(w, h, false);
+    sr.camera.aspect = w/h;
+    sr.camera.updateProjectionMatrix();
+    // 正交相机适配模型大小
+    fitOrtho(sr.camera, w/h);
+    sr.renderer.render(sixScene, sr.camera);
+  });
+}
+
+function fitOrtho(cam, aspect){
+  // 让模型（约 -1450..650 高，半径 625）适配视图
+  var halfH = 1250, halfW = 1250;
+  if(aspect > 1){ halfW = halfH * aspect; } else { halfH = halfW / aspect; }
+  cam.left = -halfW; cam.right = halfW;
+  cam.top = halfH; cam.bottom = -halfH;
+  cam.updateProjectionMatrix();
+}
+
+function showSixPanel(){
+  setupSixView();
+  document.getElementById('sixPanel').classList.add('show');
+  controls.enabled = false;
+  renderSixView();
+  // 尺寸标注（等布局完成后画）
+  setTimeout(drawAllDims, 150);
+  // 尺寸变化时重绘
+  var rafSix = function(){
+    if(!document.getElementById('sixPanel').classList.contains('show')) return;
+    renderSixView();
+    drawAllDims();
+    requestAnimationFrame(rafSix);
+  };
+  requestAnimationFrame(rafSix);
+}
+
+function hideSixPanel(){
+  document.getElementById('sixPanel').classList.remove('show');
+  controls.enabled = true;
+}
+
+document.getElementById('btnSix').addEventListener('click', showSixPanel);
+document.getElementById('sixClose').addEventListener('click', hideSixPanel);
+
+/* ---------- 打印 / 导出 ---------- */
+document.getElementById('btnPrint').addEventListener('click', function(){
+  // 打印前确保六视图已显示并画好
+  if(!document.getElementById('sixPanel').classList.contains('show')){
+    showSixPanel();
+    setTimeout(function(){ window.print(); }, 400);
+  } else {
+    drawAllDims();
+    window.print();
+  }
+});
+
+/* ---------- 尺寸标注（六视图里的 SVG 尺寸线） ---------- */
+function profBounds(){
+  var ys = currentProfile.map(function(p){return p[0]});
+  var rs = currentProfile.map(function(p){return p[1]});
+  return {
+    yMin: Math.min.apply(null, ys), yMax: Math.max.apply(null, ys),
+    rMax: Math.max.apply(null, rs)
+  };
+}
+
+// 把模型坐标映射到某个视图 cell 的 SVG 坐标
+function drawDim(face){
+  var cell = document.querySelector('#sixGrid .cell[data-face="'+face+'"]');
+  var svg = cell.querySelector('svg.dimOverlay');
+  if(!svg) return;
+  svg.innerHTML = '';
+  var w = cell.clientWidth, h = cell.clientHeight;
+  if(w < 10 || h < 10) return;
+  var b = profBounds();
+  var pad = 22;
+  var NS = 'http://www.w3.org/2000/svg';
+  function line(x1,y1,x2,y2){ var l=document.createElementNS(NS,'line'); l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2); svg.appendChild(l); }
+  function txt(x,y,s,anchor){ var t=document.createElementNS(NS,'text'); t.setAttribute('x',x); t.setAttribute('y',y); t.setAttribute('text-anchor',anchor||'middle'); t.textContent=s; svg.appendChild(t); }
+
+  if(face === 'front' || face === 'back'){
+    // 主视图：总高（左侧竖线）、最大直径（顶部横线）
+    var scale = (h - pad*2) / (b.yMax - b.yMin);
+    var cy = function(y){ return h - pad - (y - b.yMin)*scale; };  // y 向上 → svg 向下
+    var cx = w/2;
+    var yTop = cy(b.yMax), yBot = cy(b.yMin);
+    // 总高标注（左侧）
+    var lx = pad + 4;
+    line(lx, yTop, lx, yBot);
+    line(lx-3, yTop, lx+3, yTop); line(lx-3, yBot, lx+3, yBot);
+    txt(lx-6, (yTop+yBot)/2, (b.yMax-b.yMin).toFixed(0), 'end');
+    // 最大直径标注（顶部完整横线，跨过物体宽度）
+    var rScale = (w - pad*2) / (b.rMax*2);
+    var rx = w/2;
+    var xL = rx - b.rMax*rScale, xR = rx + b.rMax*rScale;
+    var ty = pad + 2;
+    line(xL, ty, xR, ty);
+    line(xL, ty-4, xL, ty+4); line(xR, ty-4, xR, ty+4);
+    // 从物体顶部引两条竖线到标注线
+    var topY = cy(b.yMax);
+    line(xL, topY, xL, ty); line(xR, topY, xR, ty);
+    txt(rx, ty-8, 'Φ'+(b.rMax*2).toFixed(0), 'middle');
+  }
+  else if(face === 'top' || face === 'bottom'){
+    // 俯视图：直径圆 + 直径标注
+    var scale = (Math.min(w,h) - pad*2) / (b.rMax*2);
+    var rx = w/2, ry = h/2;
+    var R = b.rMax*scale;
+    var cir = document.createElementNS(NS,'circle');
+    cir.setAttribute('cx', rx); cir.setAttribute('cy', ry); cir.setAttribute('r', R);
+    cir.setAttribute('fill','none'); cir.setAttribute('stroke','#e0443f'); cir.setAttribute('stroke-width','1');
+    svg.appendChild(cir);
+    txt(rx, pad+8, 'Φ'+(b.rMax*2).toFixed(0), 'middle');
+  }
+  else if(face === 'left' || face === 'right'){
+    // 侧视图：和主视图一样的尺寸（旋转体）
+    var scale = (h - pad*2) / (b.yMax - b.yMin);
+    var cy = function(y){ return h - pad - (y - b.yMin)*scale; };
+    var yTop = cy(b.yMax), yBot = cy(b.yMin);
+    var lx = pad + 4;
+    line(lx, yTop, lx, yBot);
+    line(lx-3, yTop, lx+3, yTop); line(lx-3, yBot, lx+3, yBot);
+    txt(lx-6, (yTop+yBot)/2, (b.yMax-b.yMin).toFixed(0), 'end');
+  }
+}
+
+function drawAllDims(){
+  var key = JSON.stringify(profBounds()) + '|' + document.querySelector('#sixGrid .cell').clientWidth;
+  if(key === lastDimKey) return;
+  lastDimKey = key;
+  ['front','back','top','bottom','left','right'].forEach(drawDim);
+}
+var lastDimKey = '';
+
+/* ---------- 量尺寸（六视图里点两个位置测距离） ---------- */
+var measuring = false;
+var measurePts = [];   // 3D 点
+
+function toggleMeasure(){
+  measuring = !measuring;
+  measurePts = [];
+  document.getElementById('btnMeasure').style.background = measuring ? '#39c5bb' : '';
+  document.getElementById('btnMeasure').style.color = measuring ? '#fff' : '';
+  if(!measuring) clearMeasureMarkers();
+}
+document.getElementById('btnMeasure').addEventListener('click', toggleMeasure);
+
+function clearMeasureMarkers(){
+  document.querySelectorAll('.cell .measDot, .cell .measLine, .cell .measVal').forEach(function(e){ e.remove(); });
+}
+
+// 给每个 cell 绑定测量点击
+document.querySelectorAll('#sixGrid .cell').forEach(function(cell){
+  cell.addEventListener('click', function(ev){
+    if(!measuring) return;
+    var sr = sixRenderers.find(function(s){return s.cell===cell});
+    if(!sr) return;
+    var rect = cell.getBoundingClientRect();
+    var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    // 从屏幕坐标反算模型坐标（正交相机）
+    var ndcX = (mx/rect.width)*2 - 1;
+    var ndcY = -(my/rect.height)*2 + 1;
+    // 用相机矩阵反投影到 y=-200 平面（简化：取模型在该视图平面的投影）
+    var v = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(sr.camera);
+    var dir = v.sub(sr.camera.position).normalize();
+    var t = -sr.camera.position.y / dir.y;  // 交 y=0 平面
+    var p = sr.camera.position.clone().add(dir.multiplyScalar(t));
+    measurePts.push(p.clone());
+    // 画点
+    var dot = document.createElement('div');
+    dot.className = 'measDot';
+    dot.style.cssText = 'position:absolute;width:8px;height:8px;border-radius:50%;background:#e0443f;transform:translate(-50%,-50%);pointer-events:none;left:'+mx+'px;top:'+my+'px';
+    cell.appendChild(dot);
+    if(measurePts.length >= 2){
+      var a = measurePts[0], c = measurePts[1];
+      var d = a.distanceTo(c);
+      // 显示距离（3D 空间距离，对旋转体主要看直径方向）
+      var val = document.createElement('div');
+      val.className = 'measVal';
+      val.style.cssText = 'position:absolute;left:50%;bottom:26px;transform:translateX(-50%);background:#e0443f;color:#fff;font-size:11px;padding:2px 8px;border-radius:4px;pointer-events:none';
+      val.textContent = d.toFixed(0) + ' mm';
+      cell.appendChild(val);
+      // 连线
+      var line = document.createElement('div');
+      line.className = 'measLine';
+      var x1 = ((a.x - sr.camera.left) / (sr.camera.right - sr.camera.left)) * rect.width;
+      var x2 = ((c.x - sr.camera.left) / (sr.camera.right - sr.camera.left)) * rect.width;
+      line.style.cssText = 'position:absolute;top:50%;left:'+Math.min(x1,x2)+'px;width:'+Math.abs(x2-x1)+'px;height:2px;background:#e0443f;pointer-events:none';
+      cell.appendChild(line);
+      measurePts = [];
+    }
+  });
+});
+
+/* ---------- 改尺寸（实时重建） ---------- */
+document.getElementById('btnEditDim').addEventListener('click', function(){
+  var p = document.getElementById('paramPanel');
+  var show = p.style.display === 'none';
+  p.style.display = show ? 'block' : 'none';
+  if(show){
+    // 预填当前尺寸
+    var b = profBounds();
+    document.getElementById('pHeight').value = (b.yMax - b.yMin).toFixed(0);
+    document.getElementById('pFlange').value = (b.rMax*2).toFixed(0);
+    document.getElementById('pBody').value = (b.rMax*2 - 80).toFixed(0);
+    document.getElementById('pSkirt').value = (b.rMax*2 - 600).toFixed(0);
+  }
+});
+
+document.getElementById('btnApplyDim').addEventListener('click', function(){
+  var H = parseFloat(document.getElementById('pHeight').value);
+  var flange = parseFloat(document.getElementById('pFlange').value);
+  var body = parseFloat(document.getElementById('pBody').value);
+  var skirt = parseFloat(document.getElementById('pSkirt').value);
+  if(!H || !flange || !body || !skirt){ alert('请填写完整尺寸'); return; }
+  // 按新尺寸重建轮廓（保持结构比例：裙座→锥段→筒体→法兰）
+  var rf = flange/2, rb = body/2, rs = skirt/2;
+  // 各段高度按原图比例（裙座40% 锥段20% 筒体40%，法兰在顶）
+  var yBot = 0;
+  var skirtH = H*0.18, coneH = H*0.12, bodyH = H*0.60, flangeH = H*0.10;
+  var y1 = skirtH, y2 = skirtH + coneH, y3 = skirtH + coneH + bodyH;
+  var newProf = [
+    [0, rs], [0, rs*0.8],
+    [skirtH, rs*0.8], [skirtH, rb],
+    [skirtH+coneH, rb],
+    [skirtH+coneH, rb*0.96], [skirtH+coneH+bodyH, rb*0.96],
+    [skirtH+coneH+bodyH, rf],
+    [H, rf]
+  ];
+  buildModel(newProf);
+  // 更新标题和六视图
+  document.getElementById('title3d').innerHTML = '<b>生长槽（圆柱罐体）</b> · Φ'+(flange)+' × H'+H;
+  drawAllDims();
+});
 
 /* ---------- 自适应 ---------- */
 window.addEventListener('resize', function(){
