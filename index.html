@@ -220,6 +220,7 @@
         <button class="btn" id="btnSvg">导出 SVG</button>
         <button class="btn" id="btnPrint">打印</button>
         <button class="btn" id="btnViewer" title="打开图纸查看器，可看 DXF / SVG / PDF / 图片">看图纸</button>
+        <button class="btn" id="btn3d" title="打开 3D 全角度查看器，鼠标拖拽 360° 旋转">3D 全角度</button>
       </div>
     </div>
     <div class="cad-wrap"><div class="hint" id="dxfTip"></div><svg id="cadSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg></div>
@@ -1764,6 +1765,8 @@ function init(){
 
   var bv = $('btnViewer');
   if(bv) bv.addEventListener('click', function(){ window.open('viewer.html', '_blank'); });
+  var b3 = $('btn3d');
+  if(b3) b3.addEventListener('click', function(){ window.open('model3d.html', '_blank'); });
   $('btnReset').addEventListener('click', function(){
     view.yaw = -0.62;
     view.pitch = (params.type === 'vessel' || params.type === 'tank') ? 0.56 : 0.30;

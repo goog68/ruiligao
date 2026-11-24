@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生长槽 3D 模型 · 全角度查看</title>
+<style>
+  :root{
+    --bg:#0e1519; --panel:#162128; --panel2:#1b2932; --line:#26343e;
+    --accent:#39c5bb; --accent2:#ffd166; --txt:#e6eef2; --dim:#8fa6b0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--txt);
+    font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;overflow:hidden}
+  #app{display:flex;height:100%}
+  /* 左侧控制面板 */
+  #side{width:300px;min-width:300px;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;z-index:10}
+  #side .hd{padding:18px 20px 14px;border-bottom:1px solid var(--line)}
+  #side .hd h1{font-size:17px;font-weight:700;letter-spacing:.5px}
+  #side .hd h1 em{color:var(--accent);font-style:normal}
+  #side .hd .sub{font-size:11.5px;color:var(--dim);margin-top:6px;line-height:1.5}
+  #side .bd{flex:1;overflow-y:auto;padding:14px 16px}
+  .sec{margin-bottom:16px}
+  .sec .t{font-size:12px;color:var(--accent);font-weight:700;margin-bottom:8px;letter-spacing:.5px}
+  .btn{display:block;width:100%;padding:9px 12px;margin-bottom:8px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--txt);border-radius:8px;cursor:pointer;font-size:13px;
+    text-align:left;transition:.15s}
+  .btn:hover{border-color:var(--accent);background:#1f3038}
+  .btn.on{background:var(--accent);color:#08211f;border-color:var(--accent);font-weight:700}
+  .btn.warn{border-color:#b26a3a;color:#ffd0a0}
+  .btn.warn:hover{background:#2b211b;border-color:#d98a55}
+  .chk{display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 0;cursor:pointer;color:#cfe0e6}
+  .chk input{accent-color:var(--accent);width:15px;height:15px}
+  .sw{width:100%;margin:4px 0 12px}
+  .row{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:2px}
+  .meta{font-size:11.5px;color:var(--dim);line-height:1.7;background:var(--panel2);
+    border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:6px}
+  .meta b{color:var(--accent2);font-weight:600}
+  /* 右侧 3D 视口 */
+  #view{flex:1;position:relative;background:radial-gradient(1200px 700px at 50% 30%, #1a2830, #0b1115)}
+  #c3d{width:100%;height:100%;display:block;cursor:grab}
+  #c3d:active{cursor:grabbing}
+  #hint{position:absolute;left:14px;bottom:14px;font-size:11.5px;color:#7d97a3;pointer-events:none;
+    line-height:1.7}
+  #hint b{color:#b7cdd6}
+  #title3d{position:absolute;left:14px;top:14px;font-size:12px;color:#9fb6bf;pointer-events:none}
+  #title3d b{color:#e6eef2;font-size:14px}
+  #dropzone{display:none}
+  /* 文件拖入遮罩 */
+  #overlay{position:absolute;inset:0;background:rgba(10,16,20,.82);display:none;
+    align-items:center;justify-content:center;z-index:50;flex-direction:column;gap:10px}
+  #overlay.show{display:flex}
+  #overlay .big{font-size:18px;color:var(--accent);font-weight:700}
+  #overlay .sm{font-size:13px;color:#a9bfc8}
+  /* 底部工具栏（视口内） */
+  #toolbar{position:absolute;right:14px;bottom:14px;display:flex;gap:6px}
+  .tbtn{padding:8px 13px;background:rgba(22,33,40,.9);border:1px solid var(--line);color:#cfe0e6;
+    border-radius:7px;cursor:pointer;font-size:12px;transition:.15s}
+  .tbtn:hover{border-color:var(--accent);color:#fff}
+  .tbtn.on{background:var(--accent);color:#08211f;border-color:var(--accent);font-weight:700}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="hd">
+      <h1>生长槽 <em>3D 模型</em></h1>
+      <div class="sub">按真实 DXF 图纸自动重建的旋转体模型，鼠标拖拽可 360° 上下左右任意角度查看</div>
+    </div>
+    <div class="bd">
+      <div class="sec">
+        <div class="t">视角</div>
+        <button class="btn" data-view="reset">↺ 复位视角</button>
+        <button class="btn" id="btnAuto" data-view="auto">▶ 自动旋转</button>
+        <button class="btn" data-view="front">正视（前）</button>
+        <button class="btn" data-view="top">俯视（上）</button>
+        <button class="btn" data-view="side">侧视（左）</button>
+      </div>
+      <div class="sec">
+        <div class="t">显示</div>
+        <label class="chk"><input type="checkbox" id="ckWire" checked> 实体着色</label>
+        <label class="chk"><input type="checkbox" id="ckEdges"> 显示边缘线框</label>
+        <label class="chk"><input type="checkbox" id="ckAxes"> 显示坐标轴</label>
+        <label class="chk"><input type="checkbox" id="ckXray"> 半透明（透视内部）</label>
+        <div style="margin-top:6px">
+          <div class="row"><span>透明度</span><span id="opVal">90%</span></div>
+          <input type="range" class="sw" id="opacity" min="15" max="100" value="90">
+        </div>
+      </div>
+      <div class="sec">
+        <div class="t">模型信息</div>
+        <div class="meta" id="modelMeta">加载中…</div>
+      </div>
+      <div class="sec">
+        <div class="t">导入图纸</div>
+        <button class="btn warn" id="btnLoad">📂 拖入 / 选择 DXF 图纸重建</button>
+        <input type="file" id="fileInput" accept=".dxf" style="display:none">
+        <div class="meta" style="font-size:11px">把任意「粗实线 + 中心线」图层的 DXF 拖进来，程序自动找旋转轴、提取轮廓、绕轴生成 3D。当前默认加载的是「生长槽缩短40厘米」真实图纸。</div>
+      </div>
+    </div>
+  </aside>
+  <div id="view">
+    <div id="title3d"><b>生长槽（圆柱罐体）</b> · Φ1250 × H1850</div>
+    <canvas id="c3d"></canvas>
+    <div id="hint">
+      <b>左键拖拽</b>：旋转　<b>滚轮</b>：缩放　<b>右键拖拽</b>：平移<br>
+      <b>触屏</b>：单指旋转 / 双指缩放平移
+    </div>
+    <div id="toolbar">
+      <button class="tbtn" id="tbAuto">▶ 自动旋转</button>
+      <button class="tbtn" id="tbReset">复位</button>
+    </div>
+    <div id="overlay">
+      <div class="big">将 DXF 文件拖入窗口</div>
+      <div class="sm">自动识别旋转轴与轮廓，重建 3D 模型</div>
+    </div>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script>
+/* ============================================================
+ * 生长槽 3D 查看器
+ * 核心：DXF 旋转轮廓提取 + Lathe 旋转成网格 + Three.js 全角度查看
+ * ============================================================ */
+
+/* ---------- 默认轮廓（从真实图纸 生长槽缩短40厘米.dxf 提取） ----------
+ * 每个点 [y(高度,mm), r(半径,mm)]，y 向上，底部裙座为起点
+ * 顺序：从底部往上（裙座 → 锥段 → 筒体 → 顶部法兰）
+ */
+var DEFAULT_PROFILE = [
+  [-1435.4, 335],   // 裙座底座法兰外缘
+  [-1435.4, 265],   // 裙座筒体
+  [-1095.4, 265],
+  [-1095.4, 335],   // 锥段下口（与裙座过渡）
+  [ -815.4, 565],   // 锥段上口（接筒体）
+  [ -815.4, 545],   // 筒体外壁
+  [ -768.8, 545],
+  [  389.6, 545],   // 筒体顶部
+  [  389.6, 625],   // 法兰过渡
+  [  414.6, 625]    // 顶部法兰外缘（Φ1250）
+];
+
+/* ---------- DXF 解析（轻量，够用） ---------- */
+function parseDXF(text){
+  var lines = text.split(/\r?\n/);
+  var pairs = [];
+  for(var i=0;i+1<lines.length;i+=2){
+    pairs.push([lines[i].trim(), lines[i+1].replace(/\r$/,'')]);
+  }
+  var ents = [];
+  var inSec = null, block = null, blocks = {};
+  var cur = null;
+
+  for(var k=0;k<pairs.length;k++){
+    var c = pairs[k][0], v = pairs[k][1];
+    if(c === '0'){
+      if(v === 'SECTION'){ inSec = 'sec'; cur=null; }
+      else if(v === 'ENDSEC'){ inSec = null; cur=null; block=null; }
+      else if(v === 'BLOCK'){ block = {name:'', base:{x:0,y:0}, ents:[]}; cur=null; }
+      else if(v === 'ENDBLK'){ if(block && block.name) blocks[block.name]=block; block=null; cur=null; }
+      else if(v === 'EOF'){ break; }
+      else if(v === 'LINE' || v === 'LWPOLYLINE' || v === 'CIRCLE' || v === 'ARC'){
+        cur = {type:v, layer:'0', sx:0, sy:0, ex:0, ey:0, cx:0, cy:0, r:0, pts:[]};
+        if(block) block.ents.push(cur); else ents.push(cur);
+      }
+      else if(v === 'INSERT'){
+        cur = {type:'INSERT', name:'', x:0, y:0, layer:'0'};
+        if(block) block.ents.push(cur); else ents.push(cur);
+      }
+      else { cur = null; }
+      continue;
+    }
+    if(!cur) continue;
+    if(c === '2'){ if(cur.type==='INSERT') cur.name=v.trim(); else if(block && !block.name) block.name=v.trim(); }
+    else if(c === '8') cur.layer = v.trim();
+    else if(c === '10'){ if(cur.type==='CIRCLE'||cur.type==='ARC') cur.cx=parseFloat(v); else if(cur.type==='LINE') cur.sx=parseFloat(v); else if(cur.type==='LWPOLYLINE') cur.px=parseFloat(v); else if(cur.type==='INSERT') cur.x=parseFloat(v); }
+    else if(c === '20'){ if(cur.type==='CIRCLE'||cur.type==='ARC') cur.cy=parseFloat(v); else if(cur.type==='LINE') cur.sy=parseFloat(v); else if(cur.type==='LWPOLYLINE') cur.py=parseFloat(v); else if(cur.type==='INSERT') cur.y=parseFloat(v); }
+    else if(c === '11'){ if(cur.type==='LINE') cur.ex=parseFloat(v); }
+    else if(c === '21'){ if(cur.type==='LINE') cur.ey=parseFloat(v); }
+    else if(c === '40'){ if(cur.type==='CIRCLE'||cur.type==='ARC') cur.r=parseFloat(v); }
+    else if(c === '8' && cur.type==='INSERT') cur.layer = v.trim();
+    else if(c === '10' && cur.type==='LWPOLYLINE'){ /* vertex x handled below via 10 in LWPOLYLINE sequence */ }
+  }
+  // 展开 INSERT 块（简单：把块内实体平移到插入点）
+  var flat = ents.slice();
+  function expand(list, dx, dy){
+    for(var i=0;i<list.length;i++){
+      var e = list[i];
+      if(e.type === 'INSERT' && blocks[e.name]){
+        expand(blocks[e.name].ents, e.x - (blocks[e.name].base.x||0), e.y - (blocks[e.name].base.y||0));
+      } else if(e.type === 'LINE'){
+        flat.push({type:'LINE', layer:e.layer, sx:e.sx+dx, sy:e.sy+dy, ex:e.ex+dx, ey:e.ey+dy});
+      } else if(e.type === 'CIRCLE'){
+        flat.push({type:'CIRCLE', layer:e.layer, cx:e.cx+dx, cy:e.cy+dy, r:e.r});
+      }
+    }
+  }
+  expand(ents, 0, 0);
+  return flat;
+}
+
+/* ---------- 从实体中提取旋转轮廓 ---------- */
+function extractProfile(ents){
+  // 1. 找旋转轴：中心线图层里的最长竖直线
+  var axisX = null, axisLen = 0;
+  for(var i=0;i<ents.length;i++){
+    var e = ents[i];
+    if(e.type !== 'LINE') continue;
+    if(/中心线|轴线|axis|center/i.test(e.layer) && Math.abs(e.sx-e.ex)<0.5){
+      var l = Math.abs(e.sy-e.ey);
+      if(l > axisLen){ axisLen = l; axisX = (e.sx+e.ex)/2; }
+    }
+  }
+  if(axisX === null){
+    // 兜底：所有粗实线竖直线段 X 的中位数
+    var xs = [];
+    for(var i=0;i<ents.length;i++){
+      var e = ents[i];
+      if(e.type==='LINE' && /粗实线|outline/i.test(e.layer) && Math.abs(e.sx-e.ex)<0.5)
+        xs.push((e.sx+e.ex)/2);
+    }
+    if(!xs.length) return null;
+    xs.sort(function(a,b){return a-b});
+    axisX = xs[Math.floor(xs.length/2)];
+  }
+  // 2. 收集粗实线的轮廓点 (y, r=|x-axisX|)
+  var prof = {};  // y -> [r...]
+  function addPt(y, x){
+    var r = Math.abs(x - axisX);
+    if(r < 0.5) return;  // 轴上的点忽略
+    var ky = Math.round(y*10)/10;
+    (prof[ky] = prof[ky] || []).push(r);
+  }
+  for(var i=0;i<ents.length;i++){
+    var e = ents[i];
+    if(e.type !== 'LINE' || !/粗实线|outline/i.test(e.layer)) continue;
+    if(Math.abs(e.sx-e.ex) < 0.5){ addPt(e.sy, (e.sx+e.ex)/2); addPt(e.ey, (e.sx+e.ex)/2); }
+    else if(Math.abs(e.sy-e.ey) < 0.5){ addPt(e.sy, e.sx); addPt(e.ey, e.ex); }
+  }
+  var ys = Object.keys(prof).map(Number).sort(function(a,b){return a-b});
+  if(ys.length < 4) return null;
+  // 每个高度取最大半径（外轮廓），同时保留内轮廓用于挖空
+  var out = [], inner = [];
+  for(var j=0;j<ys.length;j++){
+    var y = ys[j], rs = prof[y].sort(function(a,b){return a-b});
+    out.push([y, rs[rs.length-1]]);
+    if(rs.length > 1) inner.push([y, rs[0]]);
+  }
+  return {axisX: axisX, profile: out, inner: inner, ys:ys};
+}
+
+/* ---------- 用轮廓生成 Lathe 网格 ---------- */
+function buildLathe(profile, seg){
+  seg = seg || 96;
+  var n = profile.length;
+  var positions = [], normals = [], indices = [];
+  // 顶点：i 是轮廓点序号，j 是绕轴角度
+  var verts = [];
+  for(var i=0;i<n;i++){
+    var y = profile[i][0], r = profile[i][1];
+    for(var j=0;j<=seg;j++){
+      var a = j/seg * Math.PI*2;
+      var x = r * Math.cos(a), z = r * Math.sin(a);
+      verts.push([x, y, z]);
+    }
+  }
+  var cols = seg+1;
+  function idx(i,j){ return i*cols + j; }
+  // 三角面片（侧面）
+  for(var i=0;i<n-1;i++){
+    for(var j=0;j<seg;j++){
+      var a = idx(i,j), b = idx(i,j+1), c = idx(i+1,j+1), d = idx(i+1,j);
+      indices.push(a, c, b);
+      indices.push(a, d, c);
+    }
+  }
+  var geo = new THREE.BufferGeometry();
+  for(var i=0;i<verts.length;i++){
+    positions.push(verts[i][0], verts[i][1], verts[i][2]);
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/* ---------- Three.js 场景 ---------- */
+var container = document.getElementById('view');
+var canvas = document.getElementById('c3d');
+var renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(container.clientWidth, container.clientHeight);
+
+var scene = new THREE.Scene();
+scene.background = null;
+
+var camera = new THREE.PerspectiveCamera(42, container.clientWidth/container.clientHeight, 1, 100000);
+camera.position.set(2200, 900, 2600);
+
+var controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.rotateSpeed = 0.9;
+controls.zoomSpeed = 1.1;
+controls.panSpeed = 0.8;
+controls.minDistance = 300;
+controls.maxDistance = 20000;
+controls.target.set(0, -200, 0);
+controls.update();
+
+// 光照
+var amb = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(amb);
+var key = new THREE.DirectionalLight(0xffffff, 1.0);
+key.position.set(2500, 3000, 2000);
+scene.add(key);
+var fill = new THREE.DirectionalLight(0xbfe6ff, 0.45);
+fill.position.set(-2000, 500, -1500);
+scene.add(fill);
+var rim = new THREE.DirectionalLight(0xffffff, 0.5);
+rim.position.set(0, -1500, -3000);
+scene.add(rim);
+
+// 地面参考网格
+var grid = new THREE.GridHelper(8000, 40, 0x2e4a55, 0x1c2d34);
+grid.position.y = -1500;
+scene.add(grid);
+
+var modelGroup = new THREE.Group();
+scene.add(modelGroup);
+
+var mesh, wireMesh, axesHelper;
+
+function buildModel(profile){
+  // 清除旧模型
+  while(modelGroup.children.length) modelGroup.remove(modelGroup.children[0]);
+
+  var geo = buildLathe(profile, 128);
+  geo.computeVertexNormals();
+
+  // 材质：亚克力半透明
+  var mat = new THREE.MeshPhysicalMaterial({
+    color: 0xbfe9f5,
+    metalness: 0.05,
+    roughness: 0.18,
+    transparent: true,
+    opacity: 0.9,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.25,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  mesh = new THREE.Mesh(geo, mat);
+  modelGroup.add(mesh);
+
+  // 边缘线框
+  var edgeGeo = new THREE.EdgesGeometry(geo, 22);
+  var edgeMat = new THREE.LineBasicMaterial({color:0x3a7a88, transparent:true, opacity:0.35});
+  wireMesh = new THREE.LineSegments(edgeGeo, edgeMat);
+  wireMesh.visible = false;
+  modelGroup.add(wireMesh);
+
+  // 坐标轴
+  axesHelper = new THREE.AxesHelper(1800);
+  axesHelper.visible = false;
+  modelGroup.add(axesHelper);
+
+  // 更新信息
+  updateMeta(profile);
+}
+
+function updateMeta(profile){
+  var ys = profile.map(function(p){return p[0]});
+  var rs = profile.map(function(p){return p[1]});
+  var h = Math.max.apply(null, ys) - Math.min.apply(null, ys);
+  var rMax = Math.max.apply(null, rs);
+  var el = document.getElementById('modelMeta');
+  el.innerHTML =
+    '类型：<b>旋转体（圆柱罐体）</b><br>' +
+    '轮廓点：<b>' + profile.length + '</b> 个<br>' +
+    '总高：<b>' + h.toFixed(0) + ' mm</b><br>' +
+    '最大直径：<b>Φ' + (rMax*2).toFixed(0) + ' mm</b><br>' +
+    '来源：真实 DXF 图纸自动重建';
+}
+
+buildModel(DEFAULT_PROFILE);
+
+/* ---------- 视角切换 ---------- */
+function setView(name){
+  var t = controls.target;
+  if(name === 'front'){ camera.position.set(0, -200, 6500); t.set(0,-200,0); }
+  else if(name === 'top'){ camera.position.set(0, 6500, 10); t.set(0,-200,0); }
+  else if(name === 'side'){ camera.position.set(6500, -200, 0); t.set(0,-200,0); }
+  else if(name === 'reset'){ camera.position.set(2200, 900, 2600); t.set(0,-200,0); }
+  controls.update();
+}
+
+document.querySelectorAll('[data-view]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var v = b.getAttribute('data-view');
+    if(v === 'auto'){ toggleSpin(); return; }
+    setView(v);
+  });
+});
+
+/* ---------- 自动旋转 ---------- */
+var spinning = false;
+function toggleSpin(){
+  spinning = !spinning;
+  controls.autoRotate = spinning;
+  controls.autoRotateSpeed = 2.2;
+  document.getElementById('btnAuto').classList.toggle('on', spinning);
+  document.getElementById('tbAuto').classList.toggle('on', spinning);
+  document.getElementById('btnAuto').innerHTML = spinning ? '⏸ 停止旋转' : '▶ 自动旋转';
+  document.getElementById('tbAuto').innerHTML = spinning ? '⏸' : '▶ 自动旋转';
+}
+document.getElementById('btnAuto').addEventListener('click', toggleSpin);
+document.getElementById('tbAuto').addEventListener('click', toggleSpin);
+document.getElementById('tbReset').addEventListener('click', function(){ setView('reset'); });
+
+/* ---------- 显示开关 ---------- */
+document.getElementById('ckWire').addEventListener('change', function(e){
+  mesh.visible = e.target.checked;
+});
+document.getElementById('ckEdges').addEventListener('change', function(e){
+  wireMesh.visible = e.target.checked;
+});
+document.getElementById('ckAxes').addEventListener('change', function(e){
+  axesHelper.visible = e.target.checked;
+});
+document.getElementById('ckXray').addEventListener('change', function(e){
+  mesh.material.depthWrite = false;
+  mesh.material.opacity = e.target.checked ? 0.35 : (document.getElementById('opacity').value/100);
+  mesh.material.needsUpdate = true;
+});
+document.getElementById('opacity').addEventListener('input', function(e){
+  var v = e.target.value;
+  document.getElementById('opVal').textContent = v + '%';
+  mesh.material.opacity = v/100;
+  mesh.material.needsUpdate = true;
+});
+
+/* ---------- DXF 导入重建 ---------- */
+document.getElementById('btnLoad').addEventListener('click', function(){
+  document.getElementById('fileInput').click();
+});
+document.getElementById('fileInput').addEventListener('change', function(e){
+  var f = e.target.files[0];
+  if(f) loadDXF(f);
+});
+function loadDXF(file){
+  var rd = new FileReader();
+  rd.onload = function(){
+    var ents = parseDXF(rd.result);
+    var res = extractProfile(ents);
+    if(!res){
+      alert('未识别到旋转轮廓。请确认 DXF 含「粗实线」轮廓图层和「中心线」轴线。');
+      return;
+    }
+    buildModel(res.profile);
+    document.getElementById('title3d').innerHTML =
+      '<b>导入模型</b> · 轮廓 ' + res.profile.length + ' 点';
+    setView('reset');
+  };
+  rd.readAsText(file, 'gb18030');
+}
+
+/* 拖拽导入 */
+window.addEventListener('dragover', function(e){ e.preventDefault(); document.getElementById('overlay').classList.add('show'); });
+window.addEventListener('dragleave', function(e){ if(e.target===document.getElementById('overlay')) document.getElementById('overlay').classList.remove('show'); });
+window.addEventListener('drop', function(e){
+  e.preventDefault();
+  document.getElementById('overlay').classList.remove('show');
+  var f = e.dataTransfer.files[0];
+  if(f && /\.dxf$/i.test(f.name)) loadDXF(f);
+  else alert('请拖入 .dxf 文件');
+});
+
+/* ---------- 渲染循环 ---------- */
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ---------- 自适应 ---------- */
+window.addEventListener('resize', function(){
+  camera.aspect = container.clientWidth/container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+</script>
+</body>
+</html>
