@@ -237,7 +237,8 @@ var TYPES = {
   cabinet:  {label:'亚克力展柜',   code:'RLG-ZG', en:'CABINET', defW:900, defD:500, defH:1800, defL:3},
   table:    {label:'亚克力展示台', code:'RLG-ST', en:'TABLE', defW:1000, defD:600, defH:900,  defL:1},
   box:      {label:'亚克力陈列盒', code:'RLG-HX', en:'DISPLAY BOX', defW:400, defD:300, defH:250,  defL:3},
-  lightbox: {label:'亚克力灯箱',   code:'RLG-DX', en:'LIGHT BOX', defW:800, defD:120, defH:600,  defL:1}
+  lightbox: {label:'亚克力灯箱',   code:'RLG-DX', en:'LIGHT BOX', defW:800, defD:120, defH:600,  defL:1},
+  tank:     {label:'亚克力槽体',   code:'RLG-CT', en:'TANK', defW:1200, defD:600, defH:500, defL:1}
 };
 
 var MAT = {
@@ -287,7 +288,8 @@ function parseSentence(raw){
   var p = {type:'rack', W:null, D:null, H:null, layers:null, t:null, note:[]};
 
   /* 类型 */
-  if(/灯箱|发光字|发光|招牌|logo\s*墙|背光/i.test(s)) p.type = 'lightbox';
+  if(/生长槽|长生槽|养鱼槽|养殖槽|水槽|槽体|鱼缸|/i.test(s)) p.type = 'tank';
+  else if(/灯箱|发光字|发光|招牌|logo\s*墙|背光/i.test(s)) p.type = 'lightbox';
   else if(/展柜|陈列柜|玻璃柜|柜子|柜/i.test(s)) p.type = 'cabinet';
   else if(/展示台|陈列台|台子|桌子|桌|台面/i.test(s)) p.type = 'table';
   else if(/陈列盒|收纳盒|盒子|托盘|箱/i.test(s)) p.type = 'box';
@@ -299,8 +301,15 @@ function parseSentence(raw){
   var tri = s.match(/(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)/);
   if(tri){ p.W = +tri[1]; p.D = +tri[2]; p.H = +tri[3]; p.note.push('三连尺寸 W×D×H'); }
 
-  if(p.W === null) p.W = grabNum(s, ['宽度','宽','W','w']);
-  if(p.D === null) p.D = grabNum(s, ['深度','进深','深','D','d']);
+  /* 「长」优先：槽体/水槽这类以「长×宽×高」标注 */
+  var lenV = grabNum(s, ['长度','长']);
+  if(lenV !== null && p.W === null){
+    p.W = lenV;
+    if(p.D === null) p.D = grabNum(s, ['宽度','宽','深度','进深','深','D','d']);
+  } else {
+    if(p.W === null) p.W = grabNum(s, ['宽度','宽','W','w']);
+    if(p.D === null) p.D = grabNum(s, ['深度','进深','深','D','d']);
+  }
   if(p.H === null) p.H = grabNum(s, ['高度','高','H','h']);
 
   /* 层数 */
@@ -426,7 +435,31 @@ function buildLightbox(p){
   return out;
 }
 
-var BUILDERS = {rack:buildRack, cabinet:buildCabinet, table:buildTable, box:buildBox, lightbox:buildLightbox};
+function buildTank(p){
+  var W=p.W, D=p.D, H=p.H, t=Math.max(p.t, 10), out=[];
+  out.push(box(0, t/2, 0, W, t, D, 'panel'));                          /* 底板 */
+  var hh = H - t, cy = t + hh/2;
+  out.push(box(0, cy, -(D-t)/2, W, hh, t, 'panel'));                   /* 后壁 */
+  out.push(box(0, cy,  (D-t)/2, W, hh, t, 'panel'));                   /* 前壁 */
+  out.push(box(-(W-t)/2, cy, 0, t, hh, D - 2*t, 'panel'));             /* 左壁 */
+  out.push(box( (W-t)/2, cy, 0, t, hh, D - 2*t, 'panel'));             /* 右壁 */
+  /* 沿口加强翻边 */
+  var rh = t*1.4, rw = t*1.6;
+  out.push(box(0, H - rh/2,  (D/2 - t*0.2), W + t*1.2, rh, rw, 'frame'));
+  out.push(box(0, H - rh/2, -(D/2 - t*0.2), W + t*1.2, rh, rw, 'frame'));
+  out.push(box( (W/2 - t*0.2), H - rh/2, 0, rw, rh, D + t*1.2, 'frame'));
+  out.push(box(-(W/2 - t*0.2), H - rh/2, 0, rw, rh, D + t*1.2, 'frame'));
+  /* 外壁竖向加强筋（长边） */
+  var ribs = Math.max(0, Math.floor(W/700) - 1);
+  for(var i=1;i<=ribs;i++){
+    var x = -W/2 + i*W/(ribs+1);
+    out.push(box(x, (H-t)/2 + t,  (D/2 + t*0.9), rw*0.8, H - 2*t, t*1.8, 'frame'));
+    out.push(box(x, (H-t)/2 + t, -(D/2 + t*0.9), rw*0.8, H - 2*t, t*1.8, 'frame'));
+  }
+  return out;
+}
+
+var BUILDERS = {rack:buildRack, cabinet:buildCabinet, table:buildTable, box:buildBox, lightbox:buildLightbox, tank:buildTank};
 
 function buildModel(p){
   var fn = BUILDERS[p.type] || buildRack;
