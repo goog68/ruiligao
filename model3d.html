@@ -109,10 +109,17 @@
 <div id="app">
   <aside id="side">
     <div class="hd">
-      <h1>生长槽 <em>3D 模型</em></h1>
+      <h1>生长罐 <em>3D 模型</em></h1>
       <div class="sub">按真实 DXF 图纸自动重建的旋转体模型，鼠标拖拽可 360° 上下左右任意角度查看</div>
     </div>
     <div class="bd">
+      <div class="sec">
+        <div class="t">预设模型</div>
+        <select id="selModel" style="width:100%;padding:8px 10px;border:1px solid #26343e;background:#1b2932;color:#e6eef2;border-radius:8px;font-size:13px">
+          <option value="tank2250" selected>生长罐 1050（高 2250）</option>
+          <option value="tank1850">生长槽（高 1850）</option>
+        </select>
+      </div>
       <div class="sec">
         <div class="t">视角</div>
         <button class="btn" data-view="reset">↺ 复位视角</button>
@@ -152,7 +159,7 @@
     </div>
   </aside>
   <div id="view">
-    <div id="title3d"><b>生长槽（圆柱罐体）</b> · Φ1250 × H1850</div>
+    <div id="title3d"><b>生长罐 1050（圆柱罐体）</b> · Φ1250 × H2250</div>
     <canvas id="c3d"></canvas>
     <div id="hint">
       <b>左键拖拽</b>：旋转　<b>滚轮</b>：缩放　<b>右键拖拽</b>：平移<br>
@@ -206,22 +213,48 @@
  * 核心：DXF 旋转轮廓提取 + Lathe 旋转成网格 + Three.js 全角度查看
  * ============================================================ */
 
-/* ---------- 默认轮廓（从真实图纸 生长槽缩短40厘米.dxf 提取） ----------
+/* ---------- 预设模型库（从真实图纸提取的旋转轮廓） ----------
  * 每个点 [y(高度,mm), r(半径,mm)]，y 向上，底部裙座为起点
  * 顺序：从底部往上（裙座 → 锥段 → 筒体 → 顶部法兰）
  */
-var DEFAULT_PROFILE = [
-  [-1435.4, 335],   // 裙座底座法兰外缘
-  [-1435.4, 265],   // 裙座筒体
-  [-1095.4, 265],
-  [-1095.4, 335],   // 锥段下口（与裙座过渡）
-  [ -815.4, 565],   // 锥段上口（接筒体）
-  [ -815.4, 545],   // 筒体外壁
-  [ -768.8, 545],
-  [  389.6, 545],   // 筒体顶部
-  [  389.6, 625],   // 法兰过渡
-  [  414.6, 625]    // 顶部法兰外缘（Φ1250）
-];
+var PRESET_MODELS = {
+  // 生长槽缩短40厘米.dwg —— 总高1850
+  tank1850: {
+    label: '生长槽（高 1850）',
+    title: '生长槽（圆柱罐体） · Φ1250 × H1850',
+    profile: [
+      [-1435.4, 335],   // 裙座底座法兰外缘
+      [-1435.4, 265],   // 裙座筒体
+      [-1095.4, 265],
+      [-1095.4, 335],   // 锥段下口（与裙座过渡）
+      [ -815.4, 565],   // 锥段上口（接筒体）
+      [ -815.4, 545],   // 筒体外壁
+      [ -768.8, 545],
+      [  389.6, 545],   // 筒体顶部
+      [  389.6, 625],   // 法兰过渡
+      [  414.6, 625]    // 顶部法兰外缘（Φ1250）
+    ]
+  },
+  // 生长罐1050.dwg —— 总高2250（结构相同，筒体直段加长400）
+  tank2250: {
+    label: '生长罐 1050（高 2250）',
+    title: '生长罐 1050（圆柱罐体） · Φ1250 × H2250',
+    profile: [
+      [-1435.4, 335],   // 裙座底座法兰外缘
+      [-1435.4, 265],   // 裙座筒体
+      [-1095.4, 265],
+      [-1095.4, 335],   // 锥段下口
+      [ -815.4, 565],   // 锥段上口（接筒体）
+      [ -815.4, 545],   // 筒体外壁
+      [ -768.8, 545],
+      [  789.6, 545],   // 筒体顶部（比1850版高400）
+      [  789.6, 625],   // 法兰过渡
+      [  814.6, 625]    // 顶部法兰外缘（Φ1250）
+    ]
+  }
+};
+
+var DEFAULT_PROFILE = PRESET_MODELS.tank2250.profile;
 
 /* ---------- DXF 解析（轻量，够用） ---------- */
 function parseDXF(text){
@@ -476,6 +509,17 @@ function updateMeta(profile){
 }
 
 buildModel(DEFAULT_PROFILE);
+
+/* ---------- 预设模型切换 ---------- */
+document.getElementById('selModel').addEventListener('change', function(e){
+  var m = PRESET_MODELS[e.target.value];
+  if(!m) return;
+  buildModel(m.profile);
+  document.getElementById('title3d').innerHTML = '<b>' + m.title.split('·')[0].trim() + '</b> · ' + m.title.split('·')[1].trim();
+  // 重画六视图尺寸
+  lastDimKey = '';
+  setView('reset');
+});
 
 /* ---------- 视角切换 ---------- */
 function setView(name){
